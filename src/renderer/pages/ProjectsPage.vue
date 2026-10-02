@@ -1,0 +1,267 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue';
+import fuzzysort from 'fuzzysort';
+import { useI18n } from 'vue-i18n';
+
+import type { Project, ProjectFileNode } from '@/shared/types';
+import FileTreeNode from '../components/FileTreeNode.vue';
+import FileViewer from '../components/FileViewer.vue';
+import { api } from '../services/api';
+import { activeGuardrails, clearWorkspace, persist, selectProject, selectedProject, store } from '../services/store';
+
+const { t } = useI18n();
+const projects = computed(() => store.snapshot?.projects ?? []);
+const project = computed(selectedProject);
+const search = ref('');
+const searchIndex = ref<Array<{ node: ProjectFileNode; label: string }>>([]);
+const searchCursor = ref(0);
+const busy = ref(false);
+const localError = ref<string | null>(null);
+const newInstructionPath = ref('');
+const instructionDraft = ref('');
+const instructionDirty = ref(false);
+const diffLoading = ref(false);
+
+const searchResults = computed(() => {
+  if (!search.value.trim()) return [];
+  return fuzzysort.go(search.value, searchIndex.value, { key: 'label', limit: 80 }).map((result) => result.obj.node);
+});
+const groupedChanges = computed(() => {
+  const groups = new Map<string, typeof store.git extends null ? never : NonNullable<typeof store.git>['changes']>();
+  for (const change of store.git?.changes ?? []) {
+    const label = change.kind === 'untracked' ? t('git.untracked') : change.kind === 'added' ? t('git.added') : change.kind === 'deleted' ? t('git.deleted') : change.kind === 'renamed' ? t('git.renamed') : change.kind === 'conflicted' ? t('git.conflicted') : t('git.modified');
+    const current = groups.get(label) ?? [];
+    current.push(change);
+    groups.set(label, current);
+  }
+  return [...groups.entries()];
+});
+
+function flatten(nodes: ProjectFileNode[]) {
+  const output: Array<{ node: ProjectFileNode; label: string }> = [];
+  for (const node of nodes) {
+    output.push({ node, label: node.relativePath });
+    if (node.children) output.push(...flatten(node.children));
+  }
+  return output;
+}
+
+async function loadWorkspace() {
+  if (!project.value) return;
+  busy.value = true;
+  localError.value = null;
+  store.treeLoading = true;
+  try {
+    const [tree, git, instructions] = await Promise.all([
+      api.scanProject(project.value, { showHidden: store.snapshot?.config.showHiddenFiles ?? false }),
+      api.gitStatus(project.value),
+      api.listInstructions(project.value),
+    ]);
+    store.tree = tree;
+    store.treeLoadedFor = project.value.id;
+    searchIndex.value = flatten(tree);
+    store.git = git;
+    store.instructions = instructions;
+    if (store.instructions.length && !store.selectedInstructionPath) await selectInstruction(store.instructions[0].relativePath);
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    busy.value = false;
+    store.treeLoading = false;
+  }
+}
+
+async function addProject() {
+  localError.value = null;
+  const picked = await api.pickProject();
+  if (!picked || !store.snapshot) return;
+  const candidate: Project = { id: crypto.randomUUID(), name: picked.name, path: picked.path, lastOpenedAt: new Date().toISOString() };
+  const validation = await api.validateProject(candidate);
+  if (!validation.valid) {
+    localError.value = validation.error ?? t('projects.invalidProject');
+    return;
+  }
+  store.snapshot.projects.unshift(candidate);
+  await persist('projects', store.snapshot.projects);
+  await selectProject(candidate.id);
+  await loadWorkspace();
+}
+
+async function chooseProject(projectId: string) {
+  const candidate = projects.value.find((item) => item.id === projectId);
+  if (!candidate) return;
+  candidate.lastOpenedAt = new Date().toISOString();
+  await selectProject(projectId);
+  await persist('projects', projects.value);
+  await loadWorkspace();
+}
+
+async function removeProject(projectId: string) {
+  if (!store.snapshot || !window.confirm(t('projects.removeConfirm'))) return;
+  store.snapshot.projects = store.snapshot.projects.filter((item) => item.id !== projectId);
+  await persist('projects', store.snapshot.projects);
+  if (store.snapshot.config.lastProjectId === projectId) await selectProject(null);
+  if (!project.value) clearWorkspace();
+}
+
+async function selectFile(node: ProjectFileNode) {
+  if (!project.value || node.kind !== 'file') return;
+  store.selectedFilePath = node.relativePath;
+  store.fileLoading = true;
+  store.error = null;
+  try {
+    store.selectedFile = await api.readFile(project.value, node.relativePath, activeGuardrails());
+  } catch (error) {
+    store.selectedFile = null;
+    store.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    store.fileLoading = false;
+  }
+}
+
+async function selectSearchResult(node: ProjectFileNode) {
+  if (node.kind === 'directory') return;
+  await selectFile(node);
+}
+
+async function selectChange(change: NonNullable<typeof store.git>['changes'][number]) {
+  if (!project.value || change.kind === 'deleted') return;
+  diffLoading.value = true;
+  localError.value = null;
+  try {
+    store.gitDiff = { path: change.path, staged: change.staged, content: await api.gitDiff(project.value, change.path, change.staged) };
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    diffLoading.value = false;
+  }
+}
+
+async function selectInstruction(relativePath: string) {
+  if (!project.value) return;
+  store.instructionLoading = true;
+  localError.value = null;
+  try {
+    store.selectedInstructionPath = relativePath;
+    instructionDraft.value = await api.readInstruction(project.value, relativePath);
+    instructionDirty.value = false;
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    store.instructionLoading = false;
+  }
+}
+
+async function saveInstruction() {
+  if (!project.value || !store.selectedInstructionPath) return;
+  try {
+    const existing = store.instructions.some((item) => item.relativePath === store.selectedInstructionPath);
+    await api.writeInstruction(project.value, store.selectedInstructionPath, instructionDraft.value, existing);
+    instructionDirty.value = false;
+    store.instructions = await api.listInstructions(project.value);
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function createInstruction() {
+  if (!project.value) return;
+  const relativePath = newInstructionPath.value.trim().replaceAll('\\', '/');
+  if (!relativePath) return;
+  const target = relativePath.endsWith('AGENTS.md') ? relativePath : `${relativePath.replace(/\/$/, '')}/AGENTS.md`;
+  try {
+    await api.writeInstruction(project.value, target, '', false);
+    newInstructionPath.value = '';
+    store.instructions = await api.listInstructions(project.value);
+    await selectInstruction(target);
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function handleSearchKeydown(event: KeyboardEvent) {
+  if (!searchResults.value.length) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    searchCursor.value = Math.min(searchCursor.value + 1, searchResults.value.length - 1);
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    searchCursor.value = Math.max(searchCursor.value - 1, 0);
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    void selectSearchResult(searchResults.value[searchCursor.value]);
+  }
+}
+
+watch(search, () => { searchCursor.value = 0; });
+watch(project, () => { void loadWorkspace(); });
+onMounted(() => { if (project.value && store.treeLoadedFor !== project.value.id) void loadWorkspace(); });
+</script>
+
+<template>
+  <div class="workspace-page">
+    <div class="page-heading workspace-heading">
+      <div><span class="eyebrow">{{ t('projects.eyebrow') }}</span><h1>{{ t('projects.title') }}</h1><p class="lead">{{ t('projects.intro') }}</p></div>
+      <button class="primary-button" type="button" @click="addProject">+ {{ t('projects.add') }}</button>
+    </div>
+
+    <div class="workspace-shell">
+      <aside class="project-rail">
+        <div class="rail-heading"><span class="eyebrow">{{ t('projects.registered') }}</span><span class="mono">{{ projects.length.toString().padStart(2, '0') }}</span></div>
+        <div v-if="projects.length" class="project-list">
+          <button v-for="item in projects" :key="item.id" class="project-list-item" :class="{ selected: item.id === project?.id }" type="button" @click="chooseProject(item.id)">
+            <span class="project-list-dot"></span><span><strong>{{ item.name }}</strong><small class="mono">{{ item.path }}</small></span>
+          </button>
+        </div>
+        <div v-else class="rail-empty"><span class="empty-mark">+</span><span>{{ t('projects.empty') }}</span></div>
+        <div v-if="project" class="rail-selected">
+          <span class="eyebrow">{{ t('projects.selected') }}</span><strong>{{ project.name }}</strong><span class="mono">{{ project.path }}</span>
+          <button class="danger-text-button" type="button" @click="removeProject(project.id)">{{ t('projects.remove') }}</button>
+        </div>
+      </aside>
+
+      <section class="workspace-content">
+        <div v-if="!project" class="workspace-empty empty-state"><span class="empty-mark">⌘</span><strong>{{ t('projects.noSelection') }}</strong><span>{{ t('projects.noSelectionDetail') }}</span><button class="primary-button" type="button" @click="addProject">{{ t('projects.add') }}</button></div>
+        <template v-else>
+          <div v-if="localError || store.error" class="inline-error" role="alert">{{ localError || store.error }}</div>
+          <div class="workspace-toolbar">
+            <div class="workspace-tabs" role="tablist">
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'explorer' }" type="button" @click="store.workspaceTab = 'explorer'">{{ t('workspace.explorer') }}</button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'git' }" type="button" @click="store.workspaceTab = 'git'">{{ t('workspace.gitChanges') }} <span v-if="store.git?.changes.length" class="tab-count">{{ store.git.changes.length }}</span></button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'instructions' }" type="button" @click="store.workspaceTab = 'instructions'">{{ t('workspace.instructions') }} <span v-if="store.instructions.length" class="tab-count">{{ store.instructions.length }}</span></button>
+            </div>
+            <span v-if="busy" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span>
+          </div>
+
+          <div v-if="store.workspaceTab === 'explorer'" class="explorer-layout">
+            <div class="tree-panel">
+              <div class="panel-toolbar"><label class="search-field"><span>⌕</span><input v-model="search" type="search" :placeholder="t('workspace.searchFiles')" @keydown="handleSearchKeydown"></label><button class="small-icon-button" type="button" :title="t('workspace.toggleHidden')" @click="store.snapshot!.config.showHiddenFiles = !store.snapshot!.config.showHiddenFiles; void persist('config', store.snapshot!.config); void loadWorkspace()">◌</button></div>
+              <div v-if="search" class="search-results" role="listbox">
+                <button v-for="(node, index) in searchResults" :key="node.relativePath" class="search-result" :class="{ active: index === searchCursor }" type="button" @click="selectSearchResult(node)"><span>{{ node.kind === 'directory' ? '□' : '·' }}</span><span>{{ node.relativePath }}</span></button>
+                <span v-if="!searchResults.length" class="search-empty">{{ t('workspace.noMatches') }}</span>
+              </div>
+              <div v-else-if="store.treeLoading" class="tree-empty"><span class="loading-pulse"></span>{{ t('workspace.scanning') }}</div>
+              <div v-else class="file-tree" role="tree"><FileTreeNode v-for="node in store.tree" :key="node.relativePath" :node="node" :selected-path="store.selectedFilePath" @select="selectFile" /></div>
+              <div class="tree-footer mono">{{ t('workspace.readOnly') }} · {{ t('workspace.gitignoreAware') }}</div>
+            </div>
+            <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" />
+          </div>
+
+          <div v-else-if="store.workspaceTab === 'git'" class="git-layout">
+            <div class="git-summary"><div><span class="eyebrow">{{ t('git.branch') }}</span><strong>{{ store.git?.branch ?? t('common.unavailable') }}</strong></div><div><span class="eyebrow">{{ t('git.changes') }}</span><strong>{{ store.git?.changes.length ?? 0 }}</strong></div><button class="secondary-button" type="button" @click="loadWorkspace">{{ t('common.refresh') }}</button></div>
+            <div v-if="store.git?.error" class="empty-state compact-empty"><span class="empty-mark">!</span><strong>{{ store.git.error }}</strong><span>{{ t('git.readOnlyNotice') }}</span></div>
+            <div v-else-if="!store.git?.changes.length" class="empty-state compact-empty"><span class="empty-mark">✓</span><strong>{{ t('git.clean') }}</strong><span>{{ t('git.cleanDetail') }}</span></div>
+            <div v-else class="git-changes-layout"><div class="change-list"><div v-for="[label, changes] in groupedChanges" :key="label" class="change-group"><div class="change-group-label"><span>{{ label }}</span><span class="mono">{{ changes.length.toString().padStart(2, '0') }}</span></div><button v-for="change in changes" :key="`${change.path}-${change.kind}`" class="change-item" :class="`change-${change.kind}`" type="button" @click="selectChange(change)"><span class="change-marker">{{ change.kind === 'modified' ? 'M' : change.kind === 'added' ? 'A' : change.kind === 'deleted' ? 'D' : change.kind === 'renamed' ? 'R' : change.kind === 'untracked' ? '?' : '!' }}</span><span>{{ change.path }}</span><span v-if="change.staged" class="change-state mono">{{ t('git.staged') }}</span></button></div></div><div class="diff-panel"><div v-if="diffLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('git.loadingDiff') }}</div><pre v-else-if="store.gitDiff" class="diff-content">{{ store.gitDiff.content }}</pre><div v-else class="viewer-message"><span class="empty-mark">±</span><strong>{{ t('git.selectChange') }}</strong><span>{{ t('git.selectChangeDetail') }}</span></div></div></div>
+          </div>
+
+          <div v-else class="instructions-layout">
+            <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="selectInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
+            <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !instructionDirty" @click="saveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="instructionDirty = true"></textarea><div class="editor-footer mono">{{ t('instructions.atomicNotice') }}</div></div>
+          </div>
+        </template>
+      </section>
+    </div>
+  </div>
+</template>

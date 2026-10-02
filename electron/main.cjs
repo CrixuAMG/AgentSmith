@@ -1,7 +1,9 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('node:path');
 
-const { loadSnapshot, saveResource } = require('./config-store.cjs');
+const { loadSnapshot, saveResource, root: storageRoot } = require('./config-store.cjs');
+const projectService = require('./project-service.cjs');
+const { gitStatus, gitDiff } = require('./git-service.cjs');
 
 let mainWindow;
 
@@ -30,6 +32,20 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle('storage:load', () => loadSnapshot());
   ipcMain.handle('storage:save', (_event, key, value) => saveResource(key, value));
+  ipcMain.handle('projects:pick', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const selectedPath = result.filePaths[0];
+    return { path: selectedPath, name: path.basename(selectedPath) };
+  });
+  ipcMain.handle('projects:validate', (_event, project) => projectService.validateProject(project));
+  ipcMain.handle('projects:scan', (_event, project, options) => projectService.scanProject(project, options));
+  ipcMain.handle('files:read', (_event, project, relativePath, guardrails) => projectService.readFile(project, relativePath, guardrails));
+  ipcMain.handle('git:status', (_event, project) => gitStatus(project));
+  ipcMain.handle('git:diff', (_event, project, relativePath, staged) => gitDiff(project, relativePath, staged));
+  ipcMain.handle('instructions:list', (_event, project) => projectService.listInstructions(project, path.join(storageRoot, 'instructions', 'global.md')));
+  ipcMain.handle('instructions:read', (_event, project, relativePath) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md')));
+  ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
