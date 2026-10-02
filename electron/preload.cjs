@@ -13,6 +13,7 @@ const api = {
   readInstruction: (project, relativePath) => ipcRenderer.invoke('instructions:read', project, relativePath),
   writeInstruction: (project, relativePath, content, overwrite) => ipcRenderer.invoke('instructions:write', project, relativePath, content, overwrite),
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
+  saveSuggestion: (project, content) => ipcRenderer.invoke('suggestions:save', project, content),
   startProcess: (request) => ipcRenderer.invoke('process:start', request),
   cancelProcess: (executionId) => ipcRenderer.invoke('process:cancel', executionId),
   onProcessEvent: (callback) => {

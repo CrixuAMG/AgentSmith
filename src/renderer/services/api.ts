@@ -12,6 +12,7 @@ import type {
   Project,
   ProjectFileNode,
   ResourceKey,
+  SavedSuggestion,
 } from '@/shared/types';
 
 const fallbackSnapshot: AppSnapshot = {
@@ -83,6 +84,9 @@ function browserApi(): AgentSmithApi {
     async discoverProviders() {
       return [];
     },
+    async saveSuggestion(): Promise<SavedSuggestion> {
+      throw new Error('Suggestion storage requires the desktop application.');
+    },
     async startProcess() {
       throw new Error('Process execution requires the desktop application.');
     },
@@ -115,6 +119,7 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     listInstructions: (project) => bridge.listInstructions(toPlainIpcValue(project)),
     readInstruction: (project, relativePath) => bridge.readInstruction(toPlainIpcValue(project), relativePath),
     writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
+    saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
   };
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { composePrompt } from '@/shared/prompt-composer';
-import type { Model, PromptContextOptions, ProviderDiscovery, Role } from '@/shared/types';
+import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
+import type { FeatureSuggestion, Model, PromptContextOptions, ProviderDiscovery, Role } from '@/shared/types';
 import { api, onProcessEvent } from '../services/api';
 import { activeGuardrails, selectedProject, selectProject, store } from '../services/store';
 
@@ -24,9 +25,20 @@ const copied = ref(false);
 const confirmationOpen = ref(false);
 const executionId = ref<string | null>(null);
 const executionState = ref<'idle' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
-const executionOutput = ref<Array<{ kind: 'stdout' | 'stderr' | 'system'; text: string }>>([]);
+type ExecutionOutputKind = 'stdout' | 'stderr' | 'system' | 'error';
+const executionOutput = ref<Array<{ kind: ExecutionOutputKind; text: string }>>([]);
 const exitCode = ref<number | null>(null);
 const executionCommand = ref<string | null>(null);
+const suggestion = ref<FeatureSuggestion | null>(null);
+const suggestionStep = ref(0);
+const suggestionPath = ref<string | null>(null);
+const suggestionAccepted = ref(false);
+const suggestionBusy = ref(false);
+const autoScroll = ref(true);
+const outputModalOpen = ref(false);
+const outputContainer = ref<HTMLElement | null>(null);
+const outputModalContainer = ref<HTMLElement | null>(null);
+const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 
 const contexts = reactive<PromptContextOptions>({
   globalInstructions: true,
@@ -172,6 +184,30 @@ function toggleGoal(goalId: string) {
     : [...selectedGoalIds.value, goalId];
 }
 
+function cleanOutput(text: string) {
+  return text.replace(ansiEscapePattern, '');
+}
+
+function appendOutput(kind: ExecutionOutputKind, text: string) {
+  const cleanedText = cleanOutput(text);
+  if (cleanedText) executionOutput.value.push({ kind, text: cleanedText });
+}
+
+function outputLabel(kind: ExecutionOutputKind) {
+  if (kind === 'stderr') return 'LOG';
+  if (kind === 'error') return 'ERR';
+  if (kind === 'system') return 'SYS';
+  return 'OUT';
+}
+
+async function scrollOutputToBottom() {
+  await nextTick();
+  if (!autoScroll.value) return;
+  [outputContainer.value, outputModalContainer.value].forEach((element) => {
+    if (element) element.scrollTop = element.scrollHeight;
+  });
+}
+
 function requestExecution() {
   if (!project.value) {
     localError.value = t('prompt.noProject');
@@ -193,13 +229,14 @@ async function confirmExecution() {
   if (!project.value) return;
   confirmationOpen.value = false;
   executionState.value = 'running';
-  executionOutput.value = [{ kind: 'system', text: `${t('prompt.running')} · ${project.value.path}` }];
+  executionOutput.value = [];
+  appendOutput('system', `${t('prompt.running')} · ${project.value.path}`);
   exitCode.value = null;
   try {
     const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value });
     executionId.value = result.executionId;
     executionCommand.value = result.command;
-    executionOutput.value.push({ kind: 'system', text: result.command });
+    appendOutput('system', result.command);
   } catch (error) {
     executionState.value = 'failed';
     localError.value = error instanceof Error ? error.message : String(error);
@@ -214,9 +251,13 @@ async function cancelExecution() {
 function handleProcessEvent(event: { executionId: string; kind: string; text?: string; exitCode?: number | null }) {
   if (event.executionId !== executionId.value && event.kind !== 'started') return;
   if (event.kind === 'started') executionId.value = event.executionId;
-  if (event.kind === 'stdout' || event.kind === 'stderr') executionOutput.value.push({ kind: event.kind, text: event.text ?? '' });
+  if (event.kind === 'stdout' || event.kind === 'stderr') appendOutput(event.kind, event.text ?? '');
   if (event.kind === 'completed') { executionState.value = 'completed'; exitCode.value = event.exitCode ?? 0; }
-  if (event.kind === 'failed') { executionState.value = 'failed'; exitCode.value = event.exitCode ?? null; }
+  if (event.kind === 'failed') {
+    executionState.value = 'failed';
+    exitCode.value = event.exitCode ?? null;
+    if (event.text) appendOutput('error', event.text);
+  }
   if (event.kind === 'cancelled') executionState.value = 'cancelled';
 }
 
@@ -224,9 +265,42 @@ function setTask(value: string) {
   task.value = value;
 }
 
+async function generateSuggestion() {
+  if (!project.value || suggestionBusy.value) return;
+  suggestionBusy.value = true;
+  localError.value = null;
+  try {
+    const next = composeSuggestionPrompt({
+      project: project.value,
+      role: selectedRole.value,
+      goals: goals.value,
+      step: suggestionStep.value,
+    });
+    const saved = await api.saveSuggestion(project.value, next.text);
+    suggestionStep.value += 1;
+    suggestion.value = next;
+    suggestionPath.value = saved.relativePath;
+    suggestionAccepted.value = false;
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    suggestionBusy.value = false;
+  }
+}
+
+function acceptSuggestion() {
+  if (!suggestion.value) return;
+  const existing = task.value.trim();
+  task.value = existing ? `${suggestion.value.text}\n\n---\n\n${existing}` : suggestion.value.text;
+  suggestionAccepted.value = true;
+}
+
 watch(project, () => { void loadContext(); });
 watch(() => store.selectedFilePath, () => { if (store.selectedFilePath) contexts.selectedFiles = true; });
 watch(() => store.promptFiles.length, () => { if (store.promptFiles.length) contexts.selectedFiles = true; });
+watch(() => executionOutput.value.length, () => { void scrollOutputToBottom(); });
+watch(autoScroll, (enabled) => { if (enabled) void scrollOutputToBottom(); });
+watch(outputModalOpen, (open) => { if (open) void scrollOutputToBottom(); });
 watch(() => contexts.gitDiff, async (enabled) => {
   if (!enabled || !project.value || !store.git?.changes.length) return;
   const firstChange = store.git.changes.find((change) => change.kind !== 'deleted');
@@ -254,12 +328,13 @@ onUnmounted(() => { removeProcessListener?.(); });
         <section class="prompt-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.model') }}</span><span class="mono">03</span></div><select v-model="selectedModelId"><option :value="null">{{ t('profiles.noModel') }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.id }}</option></select><input v-if="!models.length" v-model="selectedModelId" type="text" :placeholder="t('profiles.manualModelPlaceholder')" :aria-label="t('profiles.manualModel')"><select v-if="modelVariants.length" v-model="selectedVariant.reasoningEffort"><option :value="undefined">{{ t('prompt.noVariant') }}</option><option v-for="variant in modelVariants" :key="variant.id" :value="variant.id">{{ variant.label }}</option></select><span class="mono prompt-path">{{ modelVariants.length ? t('prompt.modelVariant') : models.length ? t('common.verified') : t('common.manual') }}</span></section>
       </div>
 
-      <div class="prompt-main-grid"><div class="prompt-controls"><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.role') }} / {{ t('prompt.guardrail') }}</span></div><label class="form-field"><span>{{ t('prompt.role') }}</span><select v-model="selectedRoleId"><option :value="null">{{ t('profiles.noRole') }}</option><option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option></select></label><label class="form-field"><span>{{ t('prompt.guardrail') }}</span><select v-model="selectedGuardrailId"><option :value="null">{{ t('profiles.noGuardrail') }}</option><option v-for="profile in store.snapshot?.guardrails" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label></section><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.goals') }}</span><span class="mono">{{ selectedGoalIds.length.toString().padStart(2, '0') }}</span></div><div class="goal-check-list"><label v-for="goal in store.snapshot?.goals" :key="goal.id" class="check-field"><input type="checkbox" :checked="selectedGoalIds.includes(goal.id)" :disabled="!goal.enabled" @change="toggleGoal(goal.id)"><span>{{ goal.name }}</span></label></div></section><section class="prompt-section-card"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.context') }}</span><p>{{ t('prompt.contextDetail') }}</p></div></div><label class="context-check"><input v-model="contexts.globalInstructions" type="checkbox"><span>{{ t('prompt.global') }}</span></label><label class="context-check"><input v-model="contexts.projectInstructions" type="checkbox"><span>{{ t('prompt.projectInstructions') }}</span></label><label class="context-check"><input v-model="contexts.nestedInstructions" type="checkbox"><span>{{ t('prompt.nestedInstructions') }}</span></label><label class="context-check"><input v-model="contexts.gitStatus" type="checkbox"><span>{{ t('prompt.gitStatus') }}</span></label><label class="context-check"><input v-model="contexts.gitDiff" type="checkbox"><span>{{ t('prompt.gitDiff') }}</span></label><label class="context-check"><input v-model="contexts.projectStructure" type="checkbox"><span>{{ t('prompt.structure') }}</span></label><label class="context-check"><input v-model="contexts.selectedFiles" type="checkbox" :disabled="!store.selectedFile"><span>{{ t('prompt.selectedFiles') }}</span></label><span class="context-hint">{{ store.selectedFile ? store.selectedFile.relativePath : t('prompt.selectFilesHint') }}</span></section></div><div class="prompt-composer-area"><section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></section><section class="prompt-preview"><div class="preview-header"><div><span class="eyebrow">{{ t('prompt.preview') }}</span><strong>{{ composition.text.length.toLocaleString() }} chars</strong></div><button class="secondary-button" type="button" @click="copyPrompt">{{ copied ? t('prompt.copied') : t('prompt.copy') }}</button></div><div class="preview-sections"><button v-for="section in composition.sections" :key="section.id" class="preview-section-tab" :class="{ active: selectedSectionId === section.id, included: section.included }" type="button" @click="selectedSectionId = section.id"><span>{{ section.included ? '✓' : '—' }}</span>{{ section.title }}</button></div><div class="selected-section"><div class="selected-section-heading"><span>{{ selectedSection?.title }}</span><span class="mono">{{ selectedSection?.included ? t('common.enabled') : t('common.disabled') }}</span></div><pre>{{ selectedSection?.content || t('common.none') }}</pre></div><details class="full-prompt-details"><summary>{{ t('prompt.preview') }} / {{ t('prompt.sections') }}</summary><pre>{{ composition.text }}</pre></details><div v-if="composition.blockedContexts.length" class="blocked-contexts"><strong>{{ t('prompt.blocked') }}</strong><span v-for="blocked in composition.blockedContexts" :key="blocked.path">{{ blocked.path }} · {{ blocked.reason }}</span></div></section></div></div>
+      <div class="prompt-main-grid"><div class="prompt-controls"><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.role') }} / {{ t('prompt.guardrail') }}</span></div><label class="form-field"><span>{{ t('prompt.role') }}</span><select v-model="selectedRoleId"><option :value="null">{{ t('profiles.noRole') }}</option><option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option></select></label><label class="form-field"><span>{{ t('prompt.guardrail') }}</span><select v-model="selectedGuardrailId"><option :value="null">{{ t('profiles.noGuardrail') }}</option><option v-for="profile in store.snapshot?.guardrails" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label></section><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.goals') }}</span><span class="mono">{{ selectedGoalIds.length.toString().padStart(2, '0') }}</span></div><div class="goal-check-list"><label v-for="goal in store.snapshot?.goals" :key="goal.id" class="check-field"><input type="checkbox" :checked="selectedGoalIds.includes(goal.id)" :disabled="!goal.enabled" @change="toggleGoal(goal.id)"><span>{{ goal.name }}</span></label></div></section><section class="prompt-section-card"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.context') }}</span><p>{{ t('prompt.contextDetail') }}</p></div></div><label class="context-check"><input v-model="contexts.globalInstructions" type="checkbox"><span>{{ t('prompt.global') }}</span></label><label class="context-check"><input v-model="contexts.projectInstructions" type="checkbox"><span>{{ t('prompt.projectInstructions') }}</span></label><label class="context-check"><input v-model="contexts.nestedInstructions" type="checkbox"><span>{{ t('prompt.nestedInstructions') }}</span></label><label class="context-check"><input v-model="contexts.gitStatus" type="checkbox"><span>{{ t('prompt.gitStatus') }}</span></label><label class="context-check"><input v-model="contexts.gitDiff" type="checkbox"><span>{{ t('prompt.gitDiff') }}</span></label><label class="context-check"><input v-model="contexts.projectStructure" type="checkbox"><span>{{ t('prompt.structure') }}</span></label><label class="context-check"><input v-model="contexts.selectedFiles" type="checkbox" :disabled="!store.selectedFile"><span>{{ t('prompt.selectedFiles') }}</span></label><span class="context-hint">{{ store.selectedFile ? store.selectedFile.relativePath : t('prompt.selectFilesHint') }}</span></section></div><div class="prompt-composer-area"><section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section><section v-if="suggestion" class="suggestion-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.suggestion') }} / {{ suggestion.angleLabel }}</span><p>{{ t('prompt.suggestionDetail') }}</p></div><span class="mono">{{ suggestion.round.toString().padStart(2, '0') }}</span></div><pre class="suggestion-text">{{ suggestion.text }}</pre><div class="suggestion-meta"><span class="mono truncate">{{ suggestionPath }}</span><span v-if="suggestionAccepted" class="status-pill">{{ t('prompt.suggestionAccepted') }}</span></div><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="primary-button" type="button" :disabled="suggestionAccepted" @click="acceptSuggestion">{{ t('prompt.acceptSuggestion') }} <span>↗</span></button></div></section><section class="prompt-preview"><div class="preview-header"><div><span class="eyebrow">{{ t('prompt.preview') }}</span><strong>{{ composition.text.length.toLocaleString() }} chars</strong></div><button class="secondary-button" type="button" @click="copyPrompt">{{ copied ? t('prompt.copied') : t('prompt.copy') }}</button></div><div class="preview-sections"><button v-for="section in composition.sections" :key="section.id" class="preview-section-tab" :class="{ active: selectedSectionId === section.id, included: section.included }" type="button" @click="selectedSectionId = section.id"><span>{{ section.included ? '✓' : '—' }}</span>{{ section.title }}</button></div><div class="selected-section"><div class="selected-section-heading"><span>{{ selectedSection?.title }}</span><span class="mono">{{ selectedSection?.included ? t('common.enabled') : t('common.disabled') }}</span></div><pre>{{ selectedSection?.content || t('common.none') }}</pre></div><details class="full-prompt-details"><summary>{{ t('prompt.preview') }} / {{ t('prompt.sections') }}</summary><pre>{{ composition.text }}</pre></details><div v-if="composition.blockedContexts.length" class="blocked-contexts"><strong>{{ t('prompt.blocked') }}</strong><span v-for="blocked in composition.blockedContexts" :key="blocked.path">{{ blocked.path }} · {{ blocked.reason }}</span></div></section></div></div>
 
-      <section class="execution-panel"><div class="execution-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ executionState === 'idle' ? t('prompt.idle') : t(`prompt.${executionState}`) }}</strong></div><div class="execution-actions"><span v-if="executionCommand" class="mono execution-command">{{ executionCommand }}</span><span v-if="exitCode !== null" class="mono">{{ t('prompt.exitCode') }} {{ exitCode }}</span><button v-if="executionState === 'running'" class="danger-button" type="button" @click="cancelExecution">{{ t('prompt.cancel') }}</button><button v-else-if="executionOutput.length" class="secondary-button" type="button" @click="executionOutput = []">{{ t('prompt.clearOutput') }}</button></div></div><div v-if="executionOutput.length" class="execution-output"><div v-for="(line, index) in executionOutput" :key="`${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ line.kind === 'stderr' ? 'ERR' : line.kind === 'system' ? 'SYS' : 'OUT' }}</span><span>{{ line.text }}</span></div></div><div v-else class="execution-idle"><span class="empty-mark">›_</span><span>{{ t('prompt.confirmation') }}</span></div></section>
+      <section class="execution-panel"><div class="execution-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ executionState === 'idle' ? t('prompt.idle') : t(`prompt.${executionState}`) }}</strong></div><div class="execution-actions"><span v-if="executionCommand" class="mono execution-command">{{ executionCommand }}</span><span v-if="exitCode !== null" class="mono">{{ t('prompt.exitCode') }} {{ exitCode }}</span><label class="toggle-field output-toggle"><input v-model="autoScroll" type="checkbox"><span class="toggle-track"></span><span>{{ t('prompt.autoScroll') }}</span></label><button v-if="executionOutput.length" class="secondary-button" type="button" @click="outputModalOpen = true">{{ t('prompt.popout') }}</button><button v-if="executionState === 'running'" class="danger-button" type="button" @click="cancelExecution">{{ t('prompt.cancel') }}</button><button v-else-if="executionOutput.length" class="secondary-button" type="button" @click="executionOutput = []">{{ t('prompt.clearOutput') }}</button></div></div><div v-if="executionOutput.length" ref="outputContainer" class="execution-output"><div v-for="(line, index) in executionOutput" :key="`${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ outputLabel(line.kind) }}</span><span>{{ line.text }}</span></div></div><div v-else class="execution-idle"><span class="empty-mark">›_</span><span>{{ t('prompt.confirmation') }}</span></div></section>
     </template>
 
     <div v-if="confirmationOpen" class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('prompt.preflight') }}</span><h2>{{ t('prompt.confirm') }}</h2><p>{{ t('prompt.confirmation') }}</p><div class="confirm-summary"><span><b>{{ t('prompt.provider') }}</b>{{ selectedProviderId }}</span><span><b>{{ t('prompt.model') }}</b>{{ selectedModelId ?? t('profiles.noModel') }}</span><span><b>{{ t('prompt.project') }}</b>{{ project?.path }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ guardrail?.name ?? t('profiles.noGuardrail') }}</span></div><div class="modal-actions"><button class="secondary-button" type="button" @click="confirmationOpen = false; executionState = 'idle'">{{ t('prompt.cancel') }}</button><button class="primary-button" type="button" @click="confirmExecution">{{ t('prompt.confirm') }} <span>↗</span></button></div></section></div>
+    <div v-if="outputModalOpen" class="modal-backdrop output-modal-backdrop" @click.self="outputModalOpen = false"><section class="output-modal" role="dialog" aria-modal="true" :aria-label="t('prompt.output')"><div class="output-modal-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ executionState === 'idle' ? t('prompt.idle') : t(`prompt.${executionState}`) }}</strong></div><button class="secondary-button" type="button" @click="outputModalOpen = false">{{ t('prompt.closeOutput') }}</button></div><div ref="outputModalContainer" class="execution-output output-modal-content"><div v-for="(line, index) in executionOutput" :key="`modal-${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ outputLabel(line.kind) }}</span><span>{{ line.text }}</span></div></div></section></div>
   </div>
   <section v-if="project" class="prompt-section-card prompt-context-extra"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.context') }} / {{ t('prompt.project') }}</span><p>{{ t('prompt.contextDetail') }}</p></div></div><label class="context-check"><input v-model="contexts.providerInstructions" type="checkbox"><span>{{ t('prompt.providerInstructions') }}</span></label><label class="context-check"><input v-model="contexts.readme" type="checkbox"><span>{{ t('prompt.readme') }}</span></label><label class="context-check"><input v-model="contexts.composerJson" type="checkbox"><span>{{ t('prompt.composerJson') }}</span></label><label class="context-check"><input v-model="contexts.packageJson" type="checkbox"><span>{{ t('prompt.packageJson') }}</span></label></section>
 </template>

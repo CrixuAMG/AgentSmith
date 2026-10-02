@@ -228,6 +228,23 @@ export interface PromptComposition {
   blockedContexts: Array<{ path: string; reason: string }>;
 }
 
+export type SuggestionDiscipline = 'backend' | 'frontend' | 'quality' | 'architecture' | 'security' | 'general';
+
+export interface FeatureSuggestion {
+  angleId: string;
+  angleLabel: string;
+  discipline: SuggestionDiscipline;
+  round: number;
+  title: string;
+  text: string;
+}
+
+export interface SavedSuggestion {
+  relativePath: string;
+  absolutePath: string;
+  savedAt: string;
+}
+
 export interface AgentExecutionRequest {
   providerId: string;
   modelId: string | null;
@@ -281,6 +298,7 @@ export interface AgentSmithApi {
   readInstruction(project: Project, relativePath: string): Promise<string>;
   writeInstruction(project: Project, relativePath: string, content: string, overwrite: boolean): Promise<void>;
   discoverProviders(): Promise<ProviderDiscovery[]>;
+  saveSuggestion(project: Project, content: string): Promise<SavedSuggestion>;
   startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; command: string }>;
   cancelProcess(executionId: string): Promise<void>;
   onProcessEvent(callback: (event: ExecutionEvent) => void): () => void;

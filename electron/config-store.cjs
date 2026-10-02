@@ -14,7 +14,7 @@ const root = process.env.AGENTSMITH_CONFIG_ROOT || (process.platform === 'win32'
   ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'AgentSmith')
   : path.join(os.homedir(), '.config', 'AgentSmith'));
 
-const directories = ['goals', 'roles', 'guardrails', 'providers', 'prompts', 'instructions', 'logs'];
+const directories = ['goals', 'roles', 'guardrails', 'providers', 'prompts', 'instructions', 'suggestions', 'logs'];
 const resourceFiles = {
   config: 'config.json',
   projects: 'projects.json',
