@@ -82,7 +82,7 @@ Goals and roles contain `id`, `name`, `description`, `instructions`, `enabled`, 
 
 Provider configuration contains IDs and display preferences only. Installation and model discovery are runtime facts and are not treated as persisted truth. Agent profiles reference provider, model, variant, role, goals, and guardrail IDs; missing references are shown as unresolved instead of silently substituted.
 
-Provider-specific instruction text is stored separately in `providers/instructions.json` as a versioned map keyed by provider ID. It is optional and contains no credentials.
+Provider-specific instruction text is stored separately in `providers/instructions.json` as a versioned map keyed by provider ID. It is optional, contains no credentials, and is an AgentSmith-managed source rather than an assumption about a provider's global filesystem location.
 
 ## Prompt Model
 
@@ -96,8 +96,8 @@ The composer returns:
 }
 ```
 
-The rendered preview and execution request consume this same object. No second illustrative prompt format exists.
+The input supports independent toggles for global/provider/project/nested instructions, Git status/diff, project structure, `README.md`, `composer.json`, `package.json`, and Explorer-selected files. The rendered preview and execution request consume this same object. No second illustrative prompt format exists.
 
 ## Migration Strategy
 
-The store checks versions on load. A known older version is migrated in memory, a backup is written before the migrated document replaces the original, and the migrated version is then saved atomically. Unknown future versions are left untouched and surfaced as a configuration error instead of being overwritten.
+The store checks versions on load. Version-zero documents are migrated in memory, a backup is written before the migrated document replaces the original, and the migrated version is then saved atomically. Unknown future versions are left untouched and surfaced as a warning instead of being overwritten. Envelope fields not owned by AgentSmith are retained during collection saves.

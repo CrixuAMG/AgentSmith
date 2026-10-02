@@ -32,21 +32,21 @@ Writes are versioned, validated, backed up, and performed through a temporary fi
 * Project registration without deleting project files.
 * `.gitignore`-aware hierarchical explorer with hidden-file toggle, fuzzy search, read-only syntax-highlighted preview, binary detection, and a one-megabyte safeguard.
 * Read-only Git branch, status, staged/unstaged state, and file-level diffs.
-* Global, project, and nested `AGENTS.md` discovery and atomic editing.
+* Global, provider-scoped, project, and nested `AGENTS.md` discovery and atomic editing.
 * CRUD for reusable goals, roles, guardrail profiles, and agent profiles.
 * OpenCode and Codex provider adapters with capability reporting.
-* Deterministic Prompt Studio composition with section-by-section preview and copy support.
+* Deterministic Prompt Studio composition with section-by-section preview, provider instructions, standard manifest context, guarded multi-file selection, and copy support.
 * Explicit process confirmation, streaming stdout/stderr, exit status, and cancellation.
-* English i18n resources and dark/light theme support.
+* English i18n resources, locale-ready formatting, and dark/light theme support.
 
 ## Providers
 
-OpenCode is discovered from `PATH` and its installed `opencode models` command is queried at runtime. Returned model IDs are marked verified. Codex is detected from `PATH`; because no Codex executable is installed in the development environment and no stable model discovery interface can be verified here, its model list is intentionally empty/manual rather than guessed.
+OpenCode is discovered from `PATH` and its installed `opencode models --verbose` command is queried at runtime, with a plain `models` fallback. Returned model IDs, names, and provider-reported variants are marked verified. Codex is detected from `PATH`; because no Codex executable is installed in the development environment and no stable model discovery interface can be verified here, its model list is intentionally empty/manual rather than guessed. A manual model identifier is clearly labelled when dynamic discovery is unavailable.
 
 The initial process allowlist is `opencode` and `codex`. Commands are built as argument arrays with `shell: false` and run in the selected project root. AgentSmith never passes OpenCode's dangerous `--auto` flag by default.
 
 ## Security Boundaries
 
-Project reads are root-bound and reject traversal and symlink escapes. The viewer and prompt context deny active file-access guardrails such as `.env*` and common private-key extensions. AgentSmith writes only managed instruction paths. Prompt-only guardrails are advisory; an unsandboxed provider can still make its own filesystem or network decisions after launch. Provider sandboxing is reported as unsupported unless the provider exposes and AgentSmith configures that capability.
+Project reads are root-bound and reject traversal and symlink escapes. The viewer and prompt context deny application-baseline sensitive paths such as `.env*` and common private-key extensions, plus active guardrails. AgentSmith writes only managed instruction paths and rejects existing symlink instruction targets until explicitly reviewed. Prompt-only guardrails are advisory; an unsandboxed provider can still make its own filesystem or network decisions after launch. Provider sandboxing is reported as unsupported unless the provider exposes and AgentSmith configures that capability.
 
 See [`docs/security-model.md`](docs/security-model.md) for the complete threat model and [`docs/architecture.md`](docs/architecture.md) for module boundaries.

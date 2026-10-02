@@ -57,6 +57,7 @@ Acceptance: unavailable providers are actionable and no model is represented as 
 ## Phase 7: Prompt Studio
 
 * Add context toggles, role/goal/guardrail selection, task editing, deterministic composition, section inspection, and copy-to-clipboard.
+* Include provider instructions, README/package manifests, and multiple guarded files selected from Explorer.
 * Use the same composed prompt object for preview and process execution.
 * Block or visibly annotate contexts denied by the selected guardrail profile.
 
@@ -83,4 +84,4 @@ The first release deliberately excludes Git writes, commits, history, network po
 
 ## Current Delivery Status
 
-Phases 1 through 8 are implemented in the current workspace: Electron/Vue foundation, local persistence, project explorer, Git inspection, instruction management, personalization, provider discovery, Prompt Studio, and controlled process execution. Phase 9 hardening is represented by path, symlink, malformed-configuration, guardrail, provider-argument, Git-parser, and configuration-store tests, plus the typecheck, lint, and production build commands in `package.json`. Remaining limitations are documented in `README.md` and `security-model.md` rather than hidden behind mock behavior.
+Phases 1 through 9 are implemented in the current workspace: Electron/Vue foundation, local persistence and migrations, project explorer, Git inspection, instruction management, personalization, provider discovery, Prompt Studio, controlled process execution, and hardening. Coverage includes path, symlink, malformed/future configuration, guardrail, provider-argument/variant, Git-parser/diff, prompt composition, and UI shell tests. Remaining limitations are documented in `README.md` and `security-model.md` rather than hidden behind mock behavior.

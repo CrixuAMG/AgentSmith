@@ -11,7 +11,7 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * Relative file paths are resolved against the canonical project root. Absolute paths, `..` traversal, and paths whose resolved target leaves the root are rejected.
 * Directory scans do not follow symbolic-link directories. File reads resolve symlinks and reject targets outside the root.
 * The read-only viewer has a one-megabyte limit and rejects binary-like content.
-* `.env*`, private keys, credential files, and active guardrail patterns are denied before reads. A denied file is never loaded into the renderer or prompt.
+* `.env*` and common private-key extensions are denied by an application baseline before reads, in addition to active user guardrails. A denied file is never loaded into the renderer or prompt.
 * Project writes are limited to `AGENTS.md` paths and use an atomic temporary-file replacement. The application never writes arbitrary project files.
 
 ## Configuration Rules
@@ -20,7 +20,7 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * API keys, tokens, environment file contents, and private keys are not stored by AgentSmith.
 * Writes validate resource shape and version, create a timestamped backup, then atomically rename a temporary file.
 * Malformed resources are quarantined with a `.invalid-<timestamp>` suffix and replaced with defaults; the user receives a warning.
-* Unknown top-level fields are retained when the document is merged with a valid resource.
+* Known version-zero resources are migrated with a backup. Unknown future versions are left untouched and surfaced as warnings. Unknown envelope fields are retained when a valid resource is saved.
 
 ## Process Rules
 
@@ -42,7 +42,7 @@ The UI distinguishes these layers and shows a warning where a rule cannot be enf
 
 ## Symlink and Instruction Safety
 
-AgentSmith never assumes a global `$HOME/AGENTS.md` convention. The canonical global file is stored in AgentSmith configuration. Provider-specific locations are detected/configured and displayed before any symlink operation. Existing files and symlinks are resolved and require explicit user confirmation before replacement or removal. The initial UI manages project instruction files directly and does not silently create global symlinks.
+AgentSmith never assumes a global `$HOME/AGENTS.md` convention. The canonical global file is stored in AgentSmith configuration. Provider-specific locations are detected/configured and displayed before any symlink operation. Existing files and symlinks are resolved and require explicit user confirmation before replacement or removal. Instruction writes reject existing symlink targets until they have been reviewed explicitly. The initial UI manages project instruction files and AgentSmith-managed provider instruction sources directly; it does not silently create global symlinks.
 
 ## Incident Handling
 
