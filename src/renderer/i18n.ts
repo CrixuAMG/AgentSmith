@@ -319,6 +319,10 @@ const messages = {
       suggestionAccepted: 'Accepted into the task',
       anotherSuggestion: 'Another suggestion',
       acceptSuggestion: 'Accept suggestion',
+      history: 'Prompt history',
+      historyDetail: 'Executed requests for this project, including the settings used.',
+      historyEmpty: 'No prompts have been executed for this project yet.',
+      started: 'Started',
     },
     settings: {
       eyebrow: 'SETTINGS / LOCAL CONFIGURATION',

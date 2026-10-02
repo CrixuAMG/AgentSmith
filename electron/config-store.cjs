@@ -21,6 +21,7 @@ const resourceFiles = {
   profiles: 'profiles.json',
   providerSettings: path.join('providers', 'providers.json'),
   providerInstructions: path.join('providers', 'instructions.json'),
+  promptHistory: path.join('prompts', 'history.json'),
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -116,6 +117,29 @@ function validProviderInstructions(value) {
   return isObject(value) && Object.values(value).every(isString);
 }
 
+function validPromptHistoryEntry(value) {
+  return isObject(value)
+    && isString(value.id)
+    && isString(value.executedAt)
+    && isString(value.task)
+    && isString(value.prompt)
+    && isString(value.providerId)
+    && (value.modelId === null || isString(value.modelId))
+    && isObject(value.variant)
+    && (value.roleId === null || isString(value.roleId))
+    && (value.roleName === null || isString(value.roleName))
+    && isStringArray(value.goalIds)
+    && (value.guardrailProfileId === null || isString(value.guardrailProfileId))
+    && (value.guardrailProfileName === null || isString(value.guardrailProfileName))
+    && (value.command === null || isString(value.command))
+    && ['started', 'completed', 'failed', 'cancelled'].includes(value.status)
+    && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)));
+}
+
+function validPromptHistory(value) {
+  return isObject(value) && Object.values(value).every((entries) => Array.isArray(entries) && entries.length <= 50 && entries.every(validPromptHistoryEntry));
+}
+
 function validDocument(value, kind) {
   if (!isObject(value) || value.version !== 1) return false;
   if (kind === 'config') return validConfig(value);
@@ -123,6 +147,7 @@ function validDocument(value, kind) {
   if (kind === 'profiles') return Array.isArray(value.profiles) && value.profiles.every(validProfile);
   if (kind === 'providerSettings') return Array.isArray(value.providers) && value.providers.every(validProviderSetting);
   if (kind === 'providerInstructions') return validProviderInstructions(value.instructions);
+  if (kind === 'promptHistory') return validPromptHistory(value.entries);
   if (kind === 'goals') return validGoal(value);
   if (kind === 'roles') return validRole(value);
   if (kind === 'guardrails') return validGuardrail(value);
@@ -223,6 +248,7 @@ async function loadSnapshot() {
   const profilesEnvelope = await readJson(path.join(root, resourceFiles.profiles), { version: 1, profiles: defaultProfiles }, warnings, 'profiles');
   const providerEnvelope = await readJson(path.join(root, resourceFiles.providerSettings), { version: 1, providers: defaultProviderSettings }, warnings, 'providerSettings');
   const providerInstructionsEnvelope = await readJson(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: {} }, warnings, 'providerInstructions');
+  const promptHistoryEnvelope = await readJson(path.join(root, resourceFiles.promptHistory), { version: 1, entries: {} }, warnings, 'promptHistory');
   const goals = await readCollection(path.join(root, 'goals'), defaultGoals, warnings);
   const roles = await readCollection(path.join(root, 'roles'), defaultRoles, warnings);
   const guardrails = await readCollection(path.join(root, 'guardrails'), defaultGuardrails, warnings);
@@ -239,6 +265,7 @@ async function loadSnapshot() {
     providerSettings: Array.isArray(providerEnvelope.providers) ? providerEnvelope.providers : clone(defaultProviderSettings),
     globalInstructions,
     providerInstructions: isObject(providerInstructionsEnvelope.instructions) ? providerInstructionsEnvelope.instructions : {},
+    promptHistory: isObject(promptHistoryEnvelope.entries) ? promptHistoryEnvelope.entries : {},
     storageRoot: root,
     warnings,
   };
@@ -256,6 +283,7 @@ function assertValidResource(key, value) {
     profiles: { version: 1, profiles: value },
     providerSettings: { version: 1, providers: value },
     providerInstructions: { version: 1, instructions: value },
+    promptHistory: { version: 1, entries: value },
   };
   if (!Object.hasOwn(documents, key)) throw new Error(`Unsupported resource: ${key}`);
   const document = documents[key];
@@ -301,6 +329,12 @@ async function saveResource(key, value) {
     assertValidResource(key, value);
     const filePath = path.join(root, resourceFiles.providerInstructions);
     await writeAtomic(filePath, await mergeEnvelope(filePath, { instructions: clone(value) }));
+    return;
+  }
+  if (key === 'promptHistory') {
+    assertValidResource(key, value);
+    const filePath = path.join(root, resourceFiles.promptHistory);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { entries: clone(value) }));
     return;
   }
   if (!['goals', 'roles', 'guardrails'].includes(key)) throw new Error(`Unsupported resource: ${key}`);

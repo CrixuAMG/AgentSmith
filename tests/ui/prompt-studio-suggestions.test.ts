@@ -41,6 +41,7 @@ function snapshot() {
     providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
     globalInstructions: '',
     providerInstructions: {},
+    promptHistory: {},
     storageRoot: '/tmp/agentsmith',
     warnings: [],
   };

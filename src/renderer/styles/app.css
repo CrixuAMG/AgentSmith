@@ -419,6 +419,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* Prompt Studio */
 .prompt-heading { margin-bottom: 28px; }
 .prompt-heading .primary-button { min-height: 38px; }
+.prompt-history-panel { display: grid; gap: 12px; margin-bottom: 10px; padding: 16px; border: 1px solid var(--line); background: var(--panel); }
+.prompt-history-panel .prompt-card-heading p { max-width: 520px; margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.5; }
+.prompt-history-list { display: grid; gap: 6px; }
+.prompt-history-entry { border: 1px solid var(--line); background: var(--bg-deep); }
+.prompt-history-entry summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; color: var(--text-soft); cursor: pointer; }
+.prompt-history-entry summary > span:first-child { display: grid; gap: 5px; min-width: 0; }
+.prompt-history-entry strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
+.prompt-history-entry small { color: var(--text-faint); font-size: 9px; }
+.history-status { flex: 0 0 auto; color: var(--green); font: 9px 'DM Mono', monospace; text-transform: uppercase; }
+.history-failed, .history-cancelled { color: var(--red); }
+.history-detail { display: grid; gap: 8px; padding: 0 12px 12px; }
+.history-detail > .mono { color: var(--text-faint); font-size: 9px; }
+.history-detail pre { max-height: 220px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); color: var(--text-soft); font: 10px/1.7 'DM Mono', monospace; white-space: pre-wrap; }
+.history-empty { color: var(--text-faint); font: 10px 'DM Mono', monospace; }
 .prompt-config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .prompt-card, .prompt-section-card, .task-editor, .prompt-preview, .execution-panel { border: 1px solid var(--line); background: var(--panel); }
 .prompt-card, .prompt-section-card, .task-editor, .prompt-preview { min-width: 0; }
@@ -489,6 +503,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .output-stderr > .mono { color: var(--text-faint); }
 .output-error, .output-error > .mono { color: var(--red); }
 .output-system > .mono { color: var(--yellow); }
+.execution-output .hljs-keyword, .execution-output .hljs-selector-tag, .execution-output .hljs-title { color: var(--green); }
+.execution-output .hljs-string, .execution-output .hljs-attr, .execution-output .hljs-number { color: var(--yellow); }
+.execution-output .hljs-comment, .execution-output .hljs-meta { color: var(--text-faint); }
 .execution-idle { display: flex; align-items: center; gap: 10px; min-height: 80px; padding: 16px; color: var(--text-faint); font-size: 11px; }
 .prompt-empty { margin-top: 10px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: rgba(2, 5, 3, .75); backdrop-filter: blur(4px); }

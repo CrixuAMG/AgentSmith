@@ -25,6 +25,7 @@ const fallbackSnapshot: AppSnapshot = {
   providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
   globalInstructions: '',
   providerInstructions: {},
+  promptHistory: {},
   storageRoot: '~/.config/AgentSmith',
   warnings: [],
 };
@@ -35,7 +36,9 @@ const listeners = new Set<(event: ExecutionEvent) => void>();
 function browserApi(): AgentSmithApi {
   const read = (): AppSnapshot => {
     const stored = localStorage.getItem(browserStorageKey);
-    return stored ? JSON.parse(stored) as AppSnapshot : structuredClone(fallbackSnapshot);
+    if (!stored) return structuredClone(fallbackSnapshot);
+    const parsed = JSON.parse(stored) as Partial<AppSnapshot>;
+    return { ...structuredClone(fallbackSnapshot), ...parsed, promptHistory: parsed.promptHistory ?? {} };
   };
   return {
     async loadSnapshot() {
@@ -52,6 +55,7 @@ function browserApi(): AgentSmithApi {
       if (key === 'providerSettings') snapshot.providerSettings = value as AppSnapshot['providerSettings'];
       if (key === 'globalInstructions') snapshot.globalInstructions = String(value);
       if (key === 'providerInstructions') snapshot.providerInstructions = value as AppSnapshot['providerInstructions'];
+      if (key === 'promptHistory') snapshot.promptHistory = value as AppSnapshot['promptHistory'];
       localStorage.setItem(browserStorageKey, JSON.stringify(snapshot));
     },
     async pickProject() {

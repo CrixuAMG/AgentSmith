@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import hljs from 'highlight.js/lib/common';
 
 import { composePrompt } from '@/shared/prompt-composer';
 import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
-import type { FeatureSuggestion, Model, PromptContextOptions, ProviderDiscovery, Role } from '@/shared/types';
+import type { FeatureSuggestion, Model, PromptContextOptions, ProviderDiscovery, PromptHistoryEntry, Role } from '@/shared/types';
 import { api, onProcessEvent } from '../services/api';
 import { activeGuardrails, selectedProject, selectProject, store } from '../services/store';
 
@@ -29,6 +30,7 @@ type ExecutionOutputKind = 'stdout' | 'stderr' | 'system' | 'error';
 const executionOutput = ref<Array<{ kind: ExecutionOutputKind; text: string }>>([]);
 const exitCode = ref<number | null>(null);
 const executionCommand = ref<string | null>(null);
+const historyEntryId = ref<string | null>(null);
 const suggestion = ref<FeatureSuggestion | null>(null);
 const suggestionStep = ref(0);
 const suggestionPath = ref<string | null>(null);
@@ -100,6 +102,7 @@ const composition = computed(() => composePrompt({
   contexts,
 }));
 const selectedSection = computed(() => composition.value.sections.find((section) => section.id === selectedSectionId.value) ?? composition.value.sections[0]);
+const promptHistory = computed(() => project.value ? (store.snapshot?.promptHistory[project.value.id] ?? []) : []);
 
 function formatTree(nodes: typeof store.tree, depth = 0): string {
   return nodes.flatMap((node) => {
@@ -200,8 +203,39 @@ function outputLabel(kind: ExecutionOutputKind) {
   return 'OUT';
 }
 
+function highlightedOutput(text: string) {
+  if (!text.trim()) return '';
+  try {
+    return hljs.highlightAuto(text).value;
+  } catch {
+    return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  }
+}
+
+function highlightOutputElements() {
+  document.querySelectorAll<HTMLElement>('.execution-output .output-line > span:last-child').forEach((element) => {
+    const text = element.textContent ?? '';
+    element.innerHTML = highlightedOutput(text);
+  });
+}
+
+async function saveHistoryEntry(patch: Partial<PromptHistoryEntry>) {
+  if (!project.value || !store.snapshot || !historyEntryId.value) return;
+  const entries = store.snapshot.promptHistory[project.value.id] ?? [];
+  const index = entries.findIndex((entry) => entry.id === historyEntryId.value);
+  if (index < 0) return;
+  entries[index] = { ...entries[index], ...patch };
+  store.snapshot.promptHistory[project.value.id] = entries;
+  await api.saveResource('promptHistory', store.snapshot.promptHistory);
+}
+
+function historySettings(entry: PromptHistoryEntry) {
+  return [entry.providerId, entry.modelId ?? t('profiles.noModel'), entry.roleName ?? t('profiles.noRole')].join(' · ');
+}
+
 async function scrollOutputToBottom() {
   await nextTick();
+  highlightOutputElements();
   if (!autoScroll.value) return;
   [outputContainer.value, outputModalContainer.value].forEach((element) => {
     if (element) element.scrollTop = element.scrollHeight;
@@ -226,19 +260,47 @@ function requestExecution() {
 }
 
 async function confirmExecution() {
-  if (!project.value) return;
+  if (!project.value || !store.snapshot) return;
   confirmationOpen.value = false;
   executionState.value = 'running';
   executionOutput.value = [];
   appendOutput('system', `${t('prompt.running')} · ${project.value.path}`);
   exitCode.value = null;
+  const entry: PromptHistoryEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    executedAt: new Date().toISOString(),
+    task: task.value,
+    prompt: composition.value.text,
+    providerId: selectedProviderId.value,
+    modelId: selectedModelId.value,
+    variant: { ...selectedVariant.value },
+    roleId: selectedRole.value?.id ?? null,
+    roleName: selectedRole.value?.name ?? null,
+    goalIds: [...selectedGoalIds.value],
+    guardrailProfileId: guardrail.value?.id ?? null,
+    guardrailProfileName: guardrail.value?.name ?? null,
+    command: null,
+    status: 'started',
+    exitCode: null,
+  };
+  historyEntryId.value = entry.id;
+  store.snapshot.promptHistory[project.value.id] = [entry, ...(store.snapshot.promptHistory[project.value.id] ?? [])].slice(0, 50);
+  try {
+    await api.saveResource('promptHistory', store.snapshot.promptHistory);
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+    historyEntryId.value = null;
+    return;
+  }
   try {
     const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value });
     executionId.value = result.executionId;
     executionCommand.value = result.command;
     appendOutput('system', result.command);
+    await saveHistoryEntry({ command: result.command });
   } catch (error) {
     executionState.value = 'failed';
+    await saveHistoryEntry({ status: 'failed' });
     localError.value = error instanceof Error ? error.message : String(error);
   }
 }
@@ -252,13 +314,14 @@ function handleProcessEvent(event: { executionId: string; kind: string; text?: s
   if (event.executionId !== executionId.value && event.kind !== 'started') return;
   if (event.kind === 'started') executionId.value = event.executionId;
   if (event.kind === 'stdout' || event.kind === 'stderr') appendOutput(event.kind, event.text ?? '');
-  if (event.kind === 'completed') { executionState.value = 'completed'; exitCode.value = event.exitCode ?? 0; }
+  if (event.kind === 'completed') { executionState.value = 'completed'; exitCode.value = event.exitCode ?? 0; void saveHistoryEntry({ status: 'completed', exitCode: exitCode.value }); }
   if (event.kind === 'failed') {
     executionState.value = 'failed';
     exitCode.value = event.exitCode ?? null;
+    void saveHistoryEntry({ status: 'failed', exitCode: exitCode.value });
     if (event.text) appendOutput('error', event.text);
   }
-  if (event.kind === 'cancelled') executionState.value = 'cancelled';
+  if (event.kind === 'cancelled') { executionState.value = 'cancelled'; void saveHistoryEntry({ status: 'cancelled' }); }
 }
 
 function setTask(value: string) {
@@ -317,6 +380,7 @@ onUnmounted(() => { removeProcessListener?.(); });
 </script>
 
 <template>
+  <section v-if="project" class="prompt-history-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.history') }}</span><p>{{ t('prompt.historyDetail') }}</p></div><span class="mono">{{ promptHistory.length.toString().padStart(2, '0') }}</span></div><div v-if="promptHistory.length" class="prompt-history-list"><details v-for="entry in promptHistory" :key="entry.id" class="prompt-history-entry"><summary><span><strong>{{ entry.task }}</strong><small class="mono">{{ new Date(entry.executedAt).toLocaleString() }}</small></span><span class="history-status" :class="`history-${entry.status}`">{{ t(`prompt.${entry.status}`) }}</span></summary><div class="history-detail"><span class="mono">{{ historySettings(entry) }}</span><span class="mono">{{ entry.roleName ?? t('profiles.noRole') }} · {{ entry.guardrailProfileName ?? t('profiles.noGuardrail') }}</span><pre>{{ entry.prompt }}</pre></div></details></div><div v-else class="history-empty">{{ t('prompt.historyEmpty') }}</div></section>
   <div class="prompt-page">
     <div class="page-heading prompt-heading"><div><span class="eyebrow">{{ t('prompt.eyebrow') }}</span><h1>{{ t('prompt.title') }}</h1><p class="lead">{{ t('prompt.intro') }}</p></div><button class="primary-button" type="button" :disabled="!project || executionState === 'running'" @click="requestExecution">{{ t('prompt.execute') }} <span>↗</span></button></div>
     <div v-if="localError" class="inline-error" role="alert">{{ localError }}</div>

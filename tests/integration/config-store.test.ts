@@ -9,7 +9,7 @@ const configRoot = mkdtempSync(path.join(os.tmpdir(), 'agentsmith-config-'));
 process.env.AGENTSMITH_CONFIG_ROOT = configRoot;
 const require = createRequire(import.meta.url);
 const configStore = require('../../electron/config-store.cjs') as {
-  loadSnapshot: () => Promise<{ config: { theme: string }; providerInstructions: Record<string, string>; storageRoot: string; warnings: string[] }>;
+  loadSnapshot: () => Promise<{ config: { theme: string }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
   saveResource: (key: string, value: unknown) => Promise<void>;
 };
 
@@ -31,6 +31,10 @@ describe('configuration storage', () => {
     const withInstructions = await configStore.loadSnapshot();
     expect(withInstructions.providerInstructions).toEqual({ opencode: 'Use read-only inspection first.' });
     expect(existsSync(path.join(configRoot, 'providers', 'instructions.json'))).toBe(true);
+    await configStore.saveResource('promptHistory', { 'project-1': [{
+      id: 'run-1', executedAt: '2026-10-02T00:00:00.000Z', task: 'Inspect the project', prompt: 'Inspect the project', providerId: 'opencode', modelId: null, variant: {}, roleId: null, roleName: null, goalIds: [], guardrailProfileId: null, guardrailProfileName: null, command: 'opencode run', status: 'completed', exitCode: 0,
+    }] });
+    expect((await configStore.loadSnapshot()).promptHistory['project-1'][0].prompt).toBe('Inspect the project');
   });
 
   it('quarantines malformed JSON instead of crashing', async () => {

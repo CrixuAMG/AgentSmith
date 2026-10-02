@@ -245,6 +245,26 @@ export interface SavedSuggestion {
   savedAt: string;
 }
 
+export type PromptHistoryStatus = 'started' | 'completed' | 'failed' | 'cancelled';
+
+export interface PromptHistoryEntry {
+  id: string;
+  executedAt: string;
+  task: string;
+  prompt: string;
+  providerId: string;
+  modelId: string | null;
+  variant: Record<string, string | number | boolean>;
+  roleId: string | null;
+  roleName: string | null;
+  goalIds: string[];
+  guardrailProfileId: string | null;
+  guardrailProfileName: string | null;
+  command: string | null;
+  status: PromptHistoryStatus;
+  exitCode: number | null;
+}
+
 export interface AgentExecutionRequest {
   providerId: string;
   modelId: string | null;
@@ -279,11 +299,12 @@ export interface AppSnapshot {
   providerSettings: ProviderSetting[];
   globalInstructions: string;
   providerInstructions: Record<string, string>;
+  promptHistory: Record<string, PromptHistoryEntry[]>;
   storageRoot: string;
   warnings: string[];
 }
 
-export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions';
+export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions' | 'promptHistory';
 
 export interface AgentSmithApi {
   loadSnapshot(): Promise<AppSnapshot>;
