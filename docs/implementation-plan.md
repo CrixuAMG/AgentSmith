@@ -80,3 +80,7 @@ Acceptance: a locally installed provider can be run without arbitrary shell acce
 ## Delivery Notes
 
 The first release deliberately excludes Git writes, commits, history, network policy enforcement outside provider capabilities, and secret storage. These require platform-specific controls or additional product decisions. Prompt-level guardrails are clearly marked as advisory; application-controlled project reads and provider process construction are enforced.
+
+## Current Delivery Status
+
+Phases 1 through 8 are implemented in the current workspace: Electron/Vue foundation, local persistence, project explorer, Git inspection, instruction management, personalization, provider discovery, Prompt Studio, and controlled process execution. Phase 9 hardening is represented by path, symlink, malformed-configuration, guardrail, provider-argument, Git-parser, and configuration-store tests, plus the typecheck, lint, and production build commands in `package.json`. Remaining limitations are documented in `README.md` and `security-model.md` rather than hidden behind mock behavior.

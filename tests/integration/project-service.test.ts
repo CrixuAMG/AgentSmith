@@ -46,8 +46,10 @@ describe('project filesystem boundaries', () => {
     temporaryDirectories.push(outside);
     await writeFile(path.join(outside, 'secret.txt'), 'outside\n');
     await symlink(path.join(outside, 'secret.txt'), path.join(project.path, 'link.txt'));
+    await symlink(outside, path.join(project.path, 'escape'));
     await expect(projectService.readFile(project, '../secret.txt', null)).rejects.toThrow();
     await expect(projectService.readFile(project, 'link.txt', null)).rejects.toThrow();
+    await expect(projectService.writeInstruction(project, 'escape/AGENTS.md', '# Escape\n', false, path.join(project.path, 'global.md'))).rejects.toThrow();
   });
 
   it('discovers and atomically creates scoped instruction files', async () => {

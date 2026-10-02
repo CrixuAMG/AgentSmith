@@ -1,18 +1,39 @@
 import type { GuardrailProfile, GuardrailRule } from './types';
 
+const expandBraces = (pattern: string): string[] => {
+  const match = pattern.match(/^(.*)\{([^{}]+)\}(.*)$/);
+  if (!match) return [pattern];
+  return match[2].split(',').flatMap((part) => expandBraces(`${match[1]}${part}${match[3]}`));
+};
+
 const globToRegExp = (pattern: string): RegExp => {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '.*')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '.');
-  return new RegExp(`^${escaped}$`, 'i');
+  const normalized = pattern.replaceAll('\\', '/');
+  let source = '';
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+    if (character === '*') {
+      if (normalized[index + 1] === '*') {
+        source += '.*';
+        index += 1;
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '.';
+    } else {
+      source += character.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${source}$`, 'i');
 };
 
 export function matchesGuardrail(rule: GuardrailRule, value: string): boolean {
   if (!rule.enabled || !rule.pattern.trim()) return false;
   if (rule.pattern.includes('*') || rule.pattern.includes('?')) {
-    return globToRegExp(rule.pattern).test(value.replaceAll('\\', '/'));
+    const normalizedValue = value.replaceAll('\\', '/');
+    return expandBraces(rule.pattern).some((pattern) =>
+      globToRegExp(pattern).test(normalizedValue)
+      || (pattern.startsWith('**/') && globToRegExp(pattern.slice(3)).test(normalizedValue)));
   }
   return value.toLowerCase().includes(rule.pattern.toLowerCase());
 }

@@ -10,9 +10,9 @@ const {
   defaultProfiles,
 } = require('./default-data.cjs');
 
-const root = process.platform === 'win32'
+const root = process.env.AGENTSMITH_CONFIG_ROOT || (process.platform === 'win32'
   ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'AgentSmith')
-  : path.join(os.homedir(), '.config', 'AgentSmith');
+  : path.join(os.homedir(), '.config', 'AgentSmith'));
 
 const directories = ['goals', 'roles', 'guardrails', 'providers', 'prompts', 'instructions', 'logs'];
 const resourceFiles = {
@@ -20,10 +20,114 @@ const resourceFiles = {
   projects: 'projects.json',
   profiles: 'profiles.json',
   providerSettings: path.join('providers', 'providers.json'),
+  providerInstructions: path.join('providers', 'instructions.json'),
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const timestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
+const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+const isString = (value) => typeof value === 'string';
+const isBoolean = (value) => typeof value === 'boolean';
+const isStringArray = (value) => Array.isArray(value) && value.every(isString);
+
+function validRule(value) {
+  return isObject(value)
+    && isString(value.id)
+    && ['file_access', 'filesystem_write', 'network', 'database', 'command', 'git', 'agent_permission'].includes(value.type)
+    && isString(value.pattern)
+    && ['deny', 'warn', 'confirm'].includes(value.action)
+    && isBoolean(value.enabled)
+    && ['prompt', 'application', 'provider', 'advisory'].includes(value.enforcement)
+    && (value.description === undefined || isString(value.description));
+}
+
+function validProject(value) {
+  return isObject(value)
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.path)
+    && isString(value.lastOpenedAt);
+}
+
+function validGoal(value) {
+  return isObject(value)
+    && value.version === 1
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.description)
+    && isStringArray(value.instructions)
+    && isBoolean(value.enabled)
+    && typeof value.order === 'number' && Number.isFinite(value.order);
+}
+
+function validRole(value) {
+  return isObject(value)
+    && value.version === 1
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.description)
+    && isStringArray(value.instructions)
+    && isStringArray(value.tags)
+    && isBoolean(value.enabled);
+}
+
+function validGuardrail(value) {
+  return isObject(value)
+    && value.version === 1
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.description)
+    && Array.isArray(value.rules)
+    && value.rules.every(validRule);
+}
+
+function validProfile(value) {
+  return isObject(value)
+    && value.version === 1
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.providerId)
+    && (value.modelId === null || isString(value.modelId))
+    && isObject(value.variant)
+    && (value.roleId === null || isString(value.roleId))
+    && isStringArray(value.goalIds)
+    && (value.guardrailProfileId === null || isString(value.guardrailProfileId));
+}
+
+function validProviderSetting(value) {
+  return isObject(value)
+    && isString(value.id)
+    && isString(value.name)
+    && (value.executable === null || isString(value.executable))
+    && isBoolean(value.enabled);
+}
+
+function validConfig(value) {
+  return isObject(value)
+    && value.version === 1
+    && isString(value.locale)
+    && (value.theme === 'dark' || value.theme === 'light')
+    && isBoolean(value.showHiddenFiles)
+    && (value.lastProjectId === null || isString(value.lastProjectId))
+    && (value.activeProfileId === null || isString(value.activeProfileId));
+}
+
+function validProviderInstructions(value) {
+  return isObject(value) && Object.values(value).every(isString);
+}
+
+function validDocument(value, kind) {
+  if (!isObject(value) || value.version !== 1) return false;
+  if (kind === 'config') return validConfig(value);
+  if (kind === 'projects') return Array.isArray(value.projects) && value.projects.every(validProject);
+  if (kind === 'profiles') return Array.isArray(value.profiles) && value.profiles.every(validProfile);
+  if (kind === 'providerSettings') return Array.isArray(value.providers) && value.providers.every(validProviderSetting);
+  if (kind === 'providerInstructions') return validProviderInstructions(value.instructions);
+  if (kind === 'goals') return validGoal(value);
+  if (kind === 'roles') return validRole(value);
+  if (kind === 'guardrails') return validGuardrail(value);
+  return false;
+}
 
 async function ensureRoot() {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
@@ -49,14 +153,14 @@ async function writeAtomic(filePath, value) {
   await fs.rename(temporary, filePath);
 }
 
-async function readJson(filePath, fallback, warnings) {
+async function readJson(filePath, fallback, warnings, kind = 'generic') {
   if (!(await exists(filePath))) {
     await writeAtomic(filePath, fallback);
     return clone(fallback);
   }
   try {
     const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    if (!parsed || parsed.version !== 1) throw new Error('unsupported schema version');
+    if (!validDocument(parsed, kind)) throw new Error('invalid schema');
     return parsed;
   } catch {
     const invalidPath = `${filePath}.invalid-${timestamp()}`;
@@ -78,7 +182,7 @@ async function readCollection(directory, defaults, warnings) {
   const values = [];
   for (const entry of jsonFiles) {
     const fallback = defaults.find((item) => item.id === path.basename(entry.name, '.json')) || defaults[0];
-    values.push(await readJson(path.join(directory, entry.name), fallback, warnings));
+    values.push(await readJson(path.join(directory, entry.name), fallback, warnings, path.basename(directory)));
   }
   return values;
 }
@@ -86,10 +190,11 @@ async function readCollection(directory, defaults, warnings) {
 async function loadSnapshot() {
   await ensureRoot();
   const warnings = [];
-  const config = await readJson(path.join(root, resourceFiles.config), defaultConfig, warnings);
-  const projectsEnvelope = await readJson(path.join(root, resourceFiles.projects), { version: 1, projects: [] }, warnings);
-  const profilesEnvelope = await readJson(path.join(root, resourceFiles.profiles), { version: 1, profiles: defaultProfiles }, warnings);
-  const providerEnvelope = await readJson(path.join(root, resourceFiles.providerSettings), { version: 1, providers: defaultProviderSettings }, warnings);
+  const config = await readJson(path.join(root, resourceFiles.config), defaultConfig, warnings, 'config');
+  const projectsEnvelope = await readJson(path.join(root, resourceFiles.projects), { version: 1, projects: [] }, warnings, 'projects');
+  const profilesEnvelope = await readJson(path.join(root, resourceFiles.profiles), { version: 1, profiles: defaultProfiles }, warnings, 'profiles');
+  const providerEnvelope = await readJson(path.join(root, resourceFiles.providerSettings), { version: 1, providers: defaultProviderSettings }, warnings, 'providerSettings');
+  const providerInstructionsEnvelope = await readJson(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: {} }, warnings, 'providerInstructions');
   const goals = await readCollection(path.join(root, 'goals'), defaultGoals, warnings);
   const roles = await readCollection(path.join(root, 'roles'), defaultRoles, warnings);
   const guardrails = await readCollection(path.join(root, 'guardrails'), defaultGuardrails, warnings);
@@ -105,18 +210,35 @@ async function loadSnapshot() {
     profiles: Array.isArray(profilesEnvelope.profiles) ? profilesEnvelope.profiles : clone(defaultProfiles),
     providerSettings: Array.isArray(providerEnvelope.providers) ? providerEnvelope.providers : clone(defaultProviderSettings),
     globalInstructions,
+    providerInstructions: isObject(providerInstructionsEnvelope.instructions) ? providerInstructionsEnvelope.instructions : {},
     storageRoot: root,
     warnings,
   };
 }
 
-function assertCollection(value, field) {
-  if (!Array.isArray(value)) throw new Error(`${field} must be an array.`);
+function assertValidResource(key, value) {
+  if (['goals', 'roles', 'guardrails'].includes(key)) {
+    const validators = { goals: validGoal, roles: validRole, guardrails: validGuardrail };
+    if (!Array.isArray(value) || !value.every(validators[key])) throw new Error(`Invalid ${key} resource.`);
+    return;
+  }
+  const documents = {
+    config: value,
+    projects: { version: 1, projects: value },
+    profiles: { version: 1, profiles: value },
+    providerSettings: { version: 1, providers: value },
+    providerInstructions: { version: 1, instructions: value },
+  };
+  if (!Object.hasOwn(documents, key)) throw new Error(`Unsupported resource: ${key}`);
+  const document = documents[key];
+  const kind = key;
+  if (!validDocument(document, kind)) throw new Error(`Invalid ${key} resource.`);
 }
 
 async function saveResource(key, value) {
   await ensureRoot();
   if (key === 'globalInstructions') {
+    if (!isString(value)) throw new Error('Global instructions must be text.');
     const globalPath = path.join(root, 'instructions', 'global.md');
     const temporary = `${globalPath}.tmp-${process.pid}-${Date.now()}`;
     if (await exists(globalPath)) await fs.copyFile(globalPath, `${globalPath}.bak-${timestamp()}`);
@@ -125,26 +247,32 @@ async function saveResource(key, value) {
     return;
   }
   if (key === 'config') {
+    assertValidResource(key, value);
     await writeAtomic(path.join(root, resourceFiles.config), { ...clone(value), version: 1 });
     return;
   }
   if (key === 'projects') {
-    assertCollection(value, 'projects');
+    assertValidResource(key, value);
     await writeAtomic(path.join(root, resourceFiles.projects), { version: 1, projects: clone(value) });
     return;
   }
   if (key === 'profiles') {
-    assertCollection(value, 'profiles');
+    assertValidResource(key, value);
     await writeAtomic(path.join(root, resourceFiles.profiles), { version: 1, profiles: clone(value) });
     return;
   }
   if (key === 'providerSettings') {
-    assertCollection(value, 'providers');
+    assertValidResource(key, value);
     await writeAtomic(path.join(root, resourceFiles.providerSettings), { version: 1, providers: clone(value) });
     return;
   }
+  if (key === 'providerInstructions') {
+    assertValidResource(key, value);
+    await writeAtomic(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: clone(value) });
+    return;
+  }
   if (!['goals', 'roles', 'guardrails'].includes(key)) throw new Error(`Unsupported resource: ${key}`);
-  assertCollection(value, key);
+  assertValidResource(key, value);
   const directory = path.join(root, key);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const existing = await fs.readdir(directory, { withFileTypes: true });

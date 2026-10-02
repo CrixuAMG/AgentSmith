@@ -343,6 +343,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .order-buttons { display: flex; align-items: center; gap: 6px; }
 .order-buttons .field-label { margin-right: 3px; }
 .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 28px; padding-top: 17px; border-top: 1px solid var(--line); }
+.editor-actions-right { display: flex; align-items: center; gap: 8px; }
 .editor-actions .primary-button { min-height: 34px; }
 .rules-header { display: flex; align-items: end; justify-content: space-between; margin: 24px 0 10px; }
 .rules-header > div { display: flex; align-items: center; gap: 10px; }
@@ -401,6 +402,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .security-lines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: auto; }
 .security-lines span { display: flex; align-items: center; gap: 9px; color: var(--text-soft); font-size: 11px; }
 .security-lines b { color: var(--green); font: 10px 'DM Mono', monospace; }
+.global-instructions-card { grid-column: span 2; min-height: 300px; }
+.global-instructions-card .settings-card-heading { align-items: start; }
+.global-instructions-card .settings-card-heading > div { display: grid; gap: 8px; }
+.global-instructions-card .settings-card-heading p { max-width: 580px; margin: 0; }
+.global-instructions-textarea { flex: 1; min-height: 130px; resize: vertical; padding: 12px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text-soft); outline: 0; font: 11px/1.7 'DM Mono', monospace; }
+.global-instructions-textarea:focus { border-color: var(--green-strong); }
+.settings-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.settings-card-actions .primary-button { min-height: 32px; }
 
 /* Prompt Studio */
 .prompt-heading { margin-bottom: 28px; }
@@ -475,7 +484,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 900px) {
   .provider-grid, .settings-cards { grid-template-columns: 1fr; }
-  .security-card { grid-column: auto; }
+  .security-card, .global-instructions-card { grid-column: auto; }
   .security-lines { grid-template-columns: 1fr; gap: 8px; }
   .prompt-main-grid { grid-template-columns: 1fr; }
 }

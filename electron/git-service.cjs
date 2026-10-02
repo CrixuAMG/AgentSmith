@@ -17,6 +17,8 @@ function runGit(args, cwd) {
 
 function parseBranch(header) {
   const value = header.slice(3).trim();
+  if (value.startsWith('No commits yet on ')) return { branch: value.slice('No commits yet on '.length), ahead: 0, behind: 0 };
+  if (value === 'HEAD (no branch)') return { branch: 'detached HEAD', ahead: 0, behind: 0 };
   const branchPart = value.split('...')[0];
   const ahead = Number(value.match(/ahead (\d+)/)?.[1] || 0);
   const behind = Number(value.match(/behind (\d+)/)?.[1] || 0);
@@ -36,14 +38,22 @@ function parseStatus(output) {
   const lines = output.split('\0').filter(Boolean);
   const header = lines.shift() || '';
   const branch = parseBranch(header);
-  const changes = lines.map((line) => {
+  const changes = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const indexStatus = line[0] || ' ';
     const worktreeStatus = line[1] || ' ';
     const rawPath = line.slice(3);
     let filePath = rawPath;
     let oldPath;
-    if (rawPath.includes(' -> ')) [oldPath, filePath] = rawPath.split(' -> ');
-    return {
+    if (rawPath.includes(' -> ')) {
+      [oldPath, filePath] = rawPath.split(' -> ');
+    } else if (indexStatus === 'R' || worktreeStatus === 'R') {
+      filePath = rawPath;
+      oldPath = lines[index + 1];
+      index += 1;
+    }
+    changes.push({
       path: filePath,
       oldPath,
       kind: changeKind(indexStatus, worktreeStatus, rawPath),
@@ -51,8 +61,8 @@ function parseStatus(output) {
       unstaged: worktreeStatus !== ' ' && worktreeStatus !== '?',
       indexStatus,
       worktreeStatus,
-    };
-  });
+    });
+  }
   return { ...branch, changes };
 }
 
@@ -63,7 +73,12 @@ async function gitStatus(project) {
   } catch (error) {
     return { isRepository: false, branch: null, ahead: 0, behind: 0, changes: [], error: error instanceof Error ? error.message : String(error) };
   }
-  const result = await runGit(['status', '--porcelain=v1', '-b', '-z'], root);
+  let result;
+  try {
+    result = await runGit(['status', '--porcelain=v1', '-b', '-z'], root);
+  } catch (error) {
+    return { isRepository: false, branch: null, ahead: 0, behind: 0, changes: [], error: error instanceof Error ? error.message : String(error) };
+  }
   if (result.code !== 0) {
     const notRepository = result.stderr.includes('not a git repository');
     return { isRepository: false, branch: null, ahead: 0, behind: 0, changes: [], error: notRepository ? 'This project is not a Git repository.' : result.stderr.trim() || 'Git status failed.' };
@@ -72,7 +87,7 @@ async function gitStatus(project) {
 }
 
 async function gitDiff(project, relativePath, staged) {
-  const target = await safePath(project, relativePath);
+  const target = await safePath(project, relativePath, { mustExist: false });
   const result = await runGit([
     'diff',
     ...(staged ? ['--cached'] : []),

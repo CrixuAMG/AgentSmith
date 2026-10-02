@@ -125,6 +125,7 @@ export interface ProviderDiscovery {
   models: Model[];
   modelDiscoveryAvailable: boolean;
   note: string | null;
+  executionSupported?: boolean;
 }
 
 export interface ProviderSetting {
@@ -225,6 +226,7 @@ export interface AgentExecutionRequest {
   prompt: string;
   projectPath: string;
   variant: Record<string, string | number | boolean>;
+  guardrailProfile?: GuardrailProfile | null;
 }
 
 export interface ExecutionConfiguration {
@@ -251,11 +253,12 @@ export interface AppSnapshot {
   profiles: AgentProfile[];
   providerSettings: ProviderSetting[];
   globalInstructions: string;
+  providerInstructions: Record<string, string>;
   storageRoot: string;
   warnings: string[];
 }
 
-export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions';
+export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions';
 
 export interface AgentSmithApi {
   loadSnapshot(): Promise<AppSnapshot>;

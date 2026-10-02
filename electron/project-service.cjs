@@ -32,7 +32,29 @@ async function safePath(project, relativePath, options = {}) {
   const normalized = normalizeRelative(relativePath);
   const candidate = path.resolve(root, normalized);
   if (!isWithin(root, candidate)) throw new Error('The requested path leaves the project root.');
-  if (options.mustExist === false) return { root, candidate, relativePath: normalized };
+  if (options.mustExist === false) {
+    try {
+      const existingTarget = await fs.realpath(candidate);
+      if (!isWithin(root, existingTarget)) throw new Error('The requested symlink resolves outside the project root.');
+      return { root, candidate: existingTarget, relativePath: normalized };
+    } catch (error) {
+      if (!(error instanceof Error && error.code === 'ENOENT')) throw error;
+      let ancestor = path.dirname(candidate);
+      while (isWithin(root, ancestor)) {
+        try {
+          const realAncestor = await fs.realpath(ancestor);
+          if (!isWithin(root, realAncestor)) throw new Error('The requested path resolves outside the project root.');
+          return { root, candidate, relativePath: normalized };
+        } catch (ancestorError) {
+          if (!(ancestorError instanceof Error && ancestorError.code === 'ENOENT')) throw ancestorError;
+          const parent = path.dirname(ancestor);
+          if (parent === ancestor) break;
+          ancestor = parent;
+        }
+      }
+      throw new Error('The requested path cannot be resolved inside the project root.');
+    }
+  }
   const target = await fs.realpath(candidate);
   if (!isWithin(root, target)) throw new Error('The requested symlink resolves outside the project root.');
   return { root, candidate: target, relativePath: normalized };

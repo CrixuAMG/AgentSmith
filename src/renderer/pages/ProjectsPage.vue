@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import fuzzysort from 'fuzzysort';
 import { useI18n } from 'vue-i18n';
 
 import type { Project, ProjectFileNode } from '@/shared/types';
 import FileTreeNode from '../components/FileTreeNode.vue';
 import FileViewer from '../components/FileViewer.vue';
 import { api } from '../services/api';
+import { fuzzySearch, indexProjectTree, type SearchEntry } from '../services/file-search';
 import { activeGuardrails, clearWorkspace, persist, selectProject, selectedProject, store } from '../services/store';
 
 const { t } = useI18n();
 const projects = computed(() => store.snapshot?.projects ?? []);
 const project = computed(selectedProject);
 const search = ref('');
-const searchIndex = ref<Array<{ node: ProjectFileNode; label: string }>>([]);
+const searchIndex = ref<SearchEntry[]>([]);
 const searchCursor = ref(0);
 const busy = ref(false);
 const localError = ref<string | null>(null);
@@ -24,7 +24,7 @@ const diffLoading = ref(false);
 
 const searchResults = computed(() => {
   if (!search.value.trim()) return [];
-  return fuzzysort.go(search.value, searchIndex.value, { key: 'label', limit: 80 }).map((result) => result.obj.node);
+  return fuzzySearch(searchIndex.value, search.value);
 });
 const groupedChanges = computed(() => {
   const groups = new Map<string, typeof store.git extends null ? never : NonNullable<typeof store.git>['changes']>();
@@ -36,15 +36,6 @@ const groupedChanges = computed(() => {
   }
   return [...groups.entries()];
 });
-
-function flatten(nodes: ProjectFileNode[]) {
-  const output: Array<{ node: ProjectFileNode; label: string }> = [];
-  for (const node of nodes) {
-    output.push({ node, label: node.relativePath });
-    if (node.children) output.push(...flatten(node.children));
-  }
-  return output;
-}
 
 async function loadWorkspace() {
   if (!project.value) return;
@@ -59,7 +50,7 @@ async function loadWorkspace() {
     ]);
     store.tree = tree;
     store.treeLoadedFor = project.value.id;
-    searchIndex.value = flatten(tree);
+    searchIndex.value = indexProjectTree(tree);
     store.git = git;
     store.instructions = instructions;
     if (store.instructions.length && !store.selectedInstructionPath) await selectInstruction(store.instructions[0].relativePath);

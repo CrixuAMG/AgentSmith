@@ -18,6 +18,7 @@ const selectedModelId = ref<string | null>(null);
 const selectedRoleId = ref<string | null>(null);
 const selectedGuardrailId = ref<string | null>(null);
 const selectedGoalIds = ref<string[]>([]);
+const selectedVariant = ref<Record<string, string | number | boolean>>({});
 const selectedSectionId = ref('contract');
 const copied = ref(false);
 const confirmationOpen = ref(false);
@@ -90,6 +91,7 @@ function applyProfileDefaults() {
   selectedRoleId.value = profile.roleId;
   selectedGoalIds.value = [...profile.goalIds];
   selectedGuardrailId.value = profile.guardrailProfileId;
+  selectedVariant.value = { ...profile.variant };
 }
 
 async function loadContext() {
@@ -145,6 +147,10 @@ function requestExecution() {
     localError.value = t('prompt.noProject');
     return;
   }
+  if (!task.value.trim()) {
+    localError.value = t('prompt.noTask');
+    return;
+  }
   if (!currentDiscovery.value?.installation.installed) {
     localError.value = t('prompt.noProvider');
     return;
@@ -160,7 +166,7 @@ async function confirmExecution() {
   executionOutput.value = [{ kind: 'system', text: `${t('prompt.running')} · ${project.value.path}` }];
   exitCode.value = null;
   try {
-    const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: {} });
+    const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value });
     executionId.value = result.executionId;
     executionCommand.value = result.command;
     executionOutput.value.push({ kind: 'system', text: result.command });

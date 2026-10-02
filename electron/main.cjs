@@ -5,7 +5,7 @@ const { loadSnapshot, saveResource, root: storageRoot } = require('./config-stor
 const projectService = require('./project-service.cjs');
 const { gitStatus, gitDiff } = require('./git-service.cjs');
 const { discoverProviders } = require('./provider-service.cjs');
-const { startProcess, cancelProcess } = require('./process-service.cjs');
+const { startProcess, cancelProcess, cancelAllProcesses } = require('./process-service.cjs');
 
 let mainWindow;
 
@@ -59,4 +59,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  cancelAllProcesses();
 });

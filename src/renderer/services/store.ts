@@ -90,4 +90,5 @@ export function applyResource(key: ResourceKey, value: unknown) {
   if (key === 'profiles') store.snapshot.profiles = value as AppSnapshot['profiles'];
   if (key === 'providerSettings') store.snapshot.providerSettings = value as AppSnapshot['providerSettings'];
   if (key === 'globalInstructions') store.snapshot.globalInstructions = String(value);
+  if (key === 'providerInstructions') store.snapshot.providerInstructions = value as AppSnapshot['providerInstructions'];
 }

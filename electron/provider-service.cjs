@@ -75,6 +75,7 @@ async function detectOpenCode() {
     models: [],
     modelDiscoveryAvailable: false,
     note: 'Install OpenCode or make its executable available on PATH.',
+    executionSupported: false,
   };
   const version = await run(executable, ['--version']);
   const models = await run(executable, ['models']);
@@ -84,6 +85,7 @@ async function detectOpenCode() {
     models: parseOpenCodeModels(models.stdout),
     modelDiscoveryAvailable: models.code === 0,
     note: models.code === 0 ? 'Models were read from the installed OpenCode CLI.' : 'OpenCode was found, but model discovery failed. Check provider diagnostics.',
+    executionSupported: true,
   };
 }
 
@@ -95,6 +97,7 @@ async function detectCodex() {
     models: [],
     modelDiscoveryAvailable: false,
     note: 'No stable model discovery interface was available without an installed Codex CLI.',
+    executionSupported: false,
   };
   const version = await run(executable, ['--version']);
   const help = await run(executable, ['--help']);
@@ -105,6 +108,7 @@ async function detectCodex() {
     models: [],
     modelDiscoveryAvailable: false,
     note: supportsExec ? 'Codex is installed. This release uses its stable exec command and requires a manually selected model when available.' : 'Codex is installed, but its exec interface was not verified from --help.',
+    executionSupported: supportsExec,
   };
 }
 
@@ -116,6 +120,7 @@ function buildExecutionCommand(request, discovery) {
   const provider = request.providerId;
   const found = discovery.find((item) => item.installation.providerId === provider);
   if (!found?.installation.installed || !found.installation.executable) throw new Error(`${provider} is not installed.`);
+  if (found.executionSupported === false) throw new Error(`${provider} does not expose a verified execution interface.`);
   if (provider === 'opencode') {
     const args = ['run'];
     if (request.modelId) args.push('--model', request.modelId);

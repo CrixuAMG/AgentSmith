@@ -8,10 +8,12 @@ All documents carry a numeric `version`. Resource files are modular so a damaged
 ~/.config/AgentSmith/
 ├── config.json
 ├── projects.json
+├── profiles.json
 ├── goals/<goal-id>.json
 ├── roles/<role-id>.json
 ├── guardrails/<profile-id>.json
 ├── providers/providers.json
+├── providers/instructions.json
 ├── instructions/global.md
 ├── prompts/templates.json
 └── logs/
@@ -79,6 +81,8 @@ Goals and roles contain `id`, `name`, `description`, `instructions`, `enabled`, 
 ## Providers and Profiles
 
 Provider configuration contains IDs and display preferences only. Installation and model discovery are runtime facts and are not treated as persisted truth. Agent profiles reference provider, model, variant, role, goals, and guardrail IDs; missing references are shown as unresolved instead of silently substituted.
+
+Provider-specific instruction text is stored separately in `providers/instructions.json` as a versioned map keyed by provider ID. It is optional and contains no credentials.
 
 ## Prompt Model
 

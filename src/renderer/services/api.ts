@@ -22,6 +22,7 @@ const fallbackSnapshot: AppSnapshot = {
   profiles: structuredClone(DEFAULT_PROFILES),
   providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
   globalInstructions: '',
+  providerInstructions: {},
   storageRoot: '~/.config/AgentSmith',
   warnings: [],
 };
@@ -48,6 +49,7 @@ function browserApi(): AgentSmithApi {
       if (key === 'profiles') snapshot.profiles = value as AppSnapshot['profiles'];
       if (key === 'providerSettings') snapshot.providerSettings = value as AppSnapshot['providerSettings'];
       if (key === 'globalInstructions') snapshot.globalInstructions = String(value);
+      if (key === 'providerInstructions') snapshot.providerInstructions = value as AppSnapshot['providerInstructions'];
       localStorage.setItem(browserStorageKey, JSON.stringify(snapshot));
     },
     async pickProject() {
