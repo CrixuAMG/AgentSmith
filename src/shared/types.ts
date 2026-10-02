@@ -266,8 +266,10 @@ export interface PromptHistoryEntry {
   roleId: string | null;
   roleName: string | null;
   goalIds: string[];
+  goalNames?: string[];
   guardrailProfileId: string | null;
   guardrailProfileName: string | null;
+  contexts?: PromptContextOptions;
   command: string | null;
   status: PromptHistoryStatus;
   exitCode: number | null;

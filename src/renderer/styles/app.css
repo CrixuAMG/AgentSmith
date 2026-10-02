@@ -438,7 +438,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .history-status { flex: 0 0 auto; color: var(--green); font: 9px 'DM Mono', monospace; text-transform: uppercase; }
 .history-failed, .history-cancelled { color: var(--red); }
 .history-detail { display: grid; gap: 8px; padding: 0 12px 12px; }
-.history-detail > .mono { color: var(--text-faint); font-size: 9px; }
+.history-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; color: var(--text-faint); font: 9px/1.5 'DM Mono', monospace; }
+.history-settings span { min-width: 0; overflow-wrap: anywhere; }
+.history-settings b { display: block; color: var(--text-faint); font-weight: 400; text-transform: uppercase; }
+.history-settings code { color: var(--text-soft); font: inherit; }
 .history-detail pre { max-height: 220px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); color: var(--text-soft); font: 10px/1.7 'DM Mono', monospace; white-space: pre-wrap; }
 .history-empty { color: var(--text-faint); font: 10px 'DM Mono', monospace; }
 .prompt-config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -545,6 +548,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .resource-list-panel .resource-list-item { display: none; }
   .resource-list-panel .resource-list-item.selected { display: grid; }
   .prompt-config-grid { grid-template-columns: 1fr; }
+  .history-settings { grid-template-columns: 1fr; }
   .execution-header { align-items: flex-start; flex-direction: column; }
   .execution-actions { width: 100%; flex-wrap: wrap; }
   .execution-command { max-width: 100%; flex-basis: 100%; }

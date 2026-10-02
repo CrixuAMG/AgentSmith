@@ -32,8 +32,9 @@ describe('configuration storage', () => {
     expect(withInstructions.providerInstructions).toEqual({ opencode: 'Use read-only inspection first.' });
     expect(existsSync(path.join(configRoot, 'providers', 'instructions.json'))).toBe(true);
     await configStore.saveResource('promptHistory', { 'project-1': [{
-      id: 'run-1', executedAt: '2026-10-02T00:00:00.000Z', task: 'Inspect the project', prompt: 'Inspect the project', providerId: 'opencode', modelId: null, variant: {}, roleId: null, roleName: null, goalIds: [], guardrailProfileId: null, guardrailProfileName: null, command: 'opencode run', status: 'completed', exitCode: 0,
-    }] });
+     id: 'run-1', executedAt: '2026-10-02T00:00:00.000Z', task: 'Inspect the project', prompt: 'Inspect the project', providerId: 'opencode', modelId: null, variant: {}, roleId: null, roleName: null, goalIds: [], guardrailProfileId: null, guardrailProfileName: null, command: 'opencode run', status: 'completed', exitCode: 0,
+       goalNames: [], contexts: { globalInstructions: true, providerInstructions: false, projectInstructions: true, nestedInstructions: false, gitStatus: true, gitDiff: false, projectStructure: true, readme: false, composerJson: false, packageJson: false, selectedFiles: false },
+     }] });
     expect((await configStore.loadSnapshot()).promptHistory['project-1'][0].prompt).toBe('Inspect the project');
   });
 

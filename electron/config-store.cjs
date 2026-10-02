@@ -175,8 +175,11 @@ function validPromptHistoryEntry(value) {
     && (value.roleId === null || isString(value.roleId))
     && (value.roleName === null || isString(value.roleName))
     && isStringArray(value.goalIds)
+    && (value.goalNames === undefined || isStringArray(value.goalNames))
     && (value.guardrailProfileId === null || isString(value.guardrailProfileId))
     && (value.guardrailProfileName === null || isString(value.guardrailProfileName))
+    && (value.contexts === undefined || (isObject(value.contexts)
+      && ['globalInstructions', 'providerInstructions', 'projectInstructions', 'nestedInstructions', 'gitStatus', 'gitDiff', 'projectStructure', 'readme', 'composerJson', 'packageJson', 'selectedFiles'].every((key) => isBoolean(value.contexts[key]))))
     && (value.command === null || isString(value.command))
     && ['started', 'completed', 'failed', 'cancelled'].includes(value.status)
     && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)));

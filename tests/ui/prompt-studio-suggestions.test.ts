@@ -122,4 +122,50 @@ describe('prompt studio suggestions', () => {
     const wrapper = await mountStudio();
     expect(wrapper.find('button.suggestion-trigger').exists()).toBe(false);
   });
+
+  it('shows the executed prompt, timestamp, and applied settings', async () => {
+    store.snapshot = {
+      ...snapshot(),
+      promptHistory: {
+        'project-1': [{
+          id: 'run-1',
+          executedAt: '2026-10-02T12:34:56.000Z',
+          task: 'Inspect the project',
+          prompt: 'Inspect the project with the selected context.',
+          providerId: 'opencode',
+          modelId: 'gpt-5',
+          variant: { reasoningEffort: 'high' },
+          roleId: 'role-1',
+          roleName: 'Senior Engineer',
+          goalIds: ['goal-1'],
+          goalNames: ['Keep changes focused'],
+          guardrailProfileId: 'default-security',
+          guardrailProfileName: 'Default security',
+          contexts: {
+            globalInstructions: true,
+            providerInstructions: false,
+            projectInstructions: true,
+            nestedInstructions: false,
+            gitStatus: true,
+            gitDiff: false,
+            projectStructure: true,
+            readme: false,
+            composerJson: false,
+            packageJson: false,
+            selectedFiles: false,
+          },
+          command: 'opencode run <prompt>',
+          status: 'completed',
+          exitCode: 0,
+        }],
+      },
+    };
+    const wrapper = await mountStudio();
+
+    expect(wrapper.find('.prompt-history-entry').text()).toContain('Inspect the project with the selected context.');
+    expect(wrapper.find('time').attributes('datetime')).toBe('2026-10-02T12:34:56.000Z');
+    expect(wrapper.find('.history-settings').text()).toContain('Keep changes focused');
+    expect(wrapper.find('.history-settings').text()).toContain('Global instructions');
+    expect(wrapper.find('.history-settings').text()).toContain('reasoningEffort: high');
+  });
 });

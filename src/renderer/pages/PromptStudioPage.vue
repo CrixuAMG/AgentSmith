@@ -233,6 +233,14 @@ function historySettings(entry: PromptHistoryEntry) {
   return [entry.providerId, entry.modelId ?? t('profiles.noModel'), entry.roleName ?? t('profiles.noRole')].join(' · ');
 }
 
+function historyContextNames(entry: PromptHistoryEntry) {
+  if (!entry.contexts) return t('prompt.historyLegacySettings');
+  return Object.entries(entry.contexts)
+    .filter(([, enabled]) => enabled)
+    .map(([key]) => t(`prompt.contextLabels.${key}`))
+    .join(', ') || t('common.none');
+}
+
 async function scrollOutputToBottom() {
   await nextTick();
   highlightOutputElements();
@@ -277,8 +285,10 @@ async function confirmExecution() {
     roleId: selectedRole.value?.id ?? null,
     roleName: selectedRole.value?.name ?? null,
     goalIds: [...selectedGoalIds.value],
+    goalNames: goals.value.map((goal) => goal.name),
     guardrailProfileId: guardrail.value?.id ?? null,
     guardrailProfileName: guardrail.value?.name ?? null,
+    contexts: { ...contexts },
     command: null,
     status: 'started',
     exitCode: null,
@@ -380,7 +390,7 @@ onUnmounted(() => { removeProcessListener?.(); });
 </script>
 
 <template>
-  <section v-if="project" class="prompt-history-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.history') }}</span><p>{{ t('prompt.historyDetail') }}</p></div><span class="mono">{{ promptHistory.length.toString().padStart(2, '0') }}</span></div><div v-if="promptHistory.length" class="prompt-history-list"><details v-for="entry in promptHistory" :key="entry.id" class="prompt-history-entry"><summary><span><strong>{{ entry.task }}</strong><small class="mono">{{ new Date(entry.executedAt).toLocaleString() }}</small></span><span class="history-status" :class="`history-${entry.status}`">{{ t(`prompt.${entry.status}`) }}</span></summary><div class="history-detail"><span class="mono">{{ historySettings(entry) }}</span><span class="mono">{{ entry.roleName ?? t('profiles.noRole') }} · {{ entry.guardrailProfileName ?? t('profiles.noGuardrail') }}</span><pre>{{ entry.prompt }}</pre></div></details></div><div v-else class="history-empty">{{ t('prompt.historyEmpty') }}</div></section>
+  <section v-if="project" class="prompt-history-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.history') }}</span><p>{{ t('prompt.historyDetail') }}</p></div><span class="mono">{{ promptHistory.length.toString().padStart(2, '0') }}</span></div><div v-if="promptHistory.length" class="prompt-history-list"><details v-for="entry in promptHistory" :key="entry.id" class="prompt-history-entry"><summary><span><strong>{{ entry.task }}</strong><time class="mono" :datetime="entry.executedAt">{{ new Date(entry.executedAt).toLocaleString() }}</time></span><span class="history-status" :class="`history-${entry.status}`">{{ t(`prompt.${entry.status}`) }}</span></summary><div class="history-detail"><div class="history-settings"><span><b>{{ t('prompt.provider') }}</b>{{ historySettings(entry) }}</span><span><b>{{ t('prompt.role') }}</b>{{ entry.roleName ?? t('profiles.noRole') }}</span><span><b>{{ t('prompt.goals') }}</b>{{ entry.goalNames?.join(', ') || t('common.none') }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ entry.guardrailProfileName ?? t('profiles.noGuardrail') }}</span><span><b>{{ t('prompt.context') }}</b>{{ historyContextNames(entry) }}</span><span v-if="entry.variant && Object.keys(entry.variant).length"><b>{{ t('prompt.modelVariant') }}</b>{{ Object.entries(entry.variant).map(([key, value]) => `${key}: ${value}`).join(', ') }}</span><span v-if="entry.command"><b>{{ t('prompt.command') }}</b><code>{{ entry.command }}</code></span></div><pre>{{ entry.prompt }}</pre></div></details></div><div v-else class="history-empty">{{ t('prompt.historyEmpty') }}</div></section>
   <div class="prompt-page">
     <div class="page-heading prompt-heading"><div><span class="eyebrow">{{ t('prompt.eyebrow') }}</span><h1>{{ t('prompt.title') }}</h1><p class="lead">{{ t('prompt.intro') }}</p></div><button class="primary-button" type="button" :disabled="!project || executionState === 'running'" @click="requestExecution">{{ t('prompt.execute') }} <span>↗</span></button></div>
     <div v-if="localError" class="inline-error" role="alert">{{ localError }}</div>
