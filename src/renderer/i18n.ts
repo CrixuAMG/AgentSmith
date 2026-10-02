@@ -227,6 +227,8 @@ const messages = {
       reasoningHigh: 'High',
       reasoningMaximum: 'Maximum',
       noModel: 'Use provider default',
+      manualModel: 'Manual model identifier',
+      manualModelPlaceholder: 'provider/model',
       role: 'Default role',
       goals: 'Default goals',
       guardrail: 'Guardrail profile',

@@ -44,4 +44,23 @@ describe('configuration storage', () => {
     await expect(configStore.saveResource('config', { theme: 'dark' })).rejects.toThrow('Invalid config resource');
     await expect(configStore.saveResource('providerInstructions', { opencode: 42 })).rejects.toThrow('Invalid providerInstructions resource');
   });
+
+  it('migrates version zero documents and preserves envelope fields', async () => {
+    writeFileSync(path.join(configRoot, 'config.json'), JSON.stringify({ version: 0, locale: 'en', theme: 'light', showHiddenFiles: false, lastProjectId: null, activeProfileId: null, customField: 'keep' }), 'utf8');
+    const migrated = await configStore.loadSnapshot();
+    expect(migrated.config.theme).toBe('light');
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'config.json'), 'utf8')).version).toBe(1);
+
+    writeFileSync(path.join(configRoot, 'projects.json'), JSON.stringify({ version: 1, projects: [], customField: 'keep' }), 'utf8');
+    await configStore.saveResource('projects', []);
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'projects.json'), 'utf8')).customField).toBe('keep');
+  });
+
+  it('does not quarantine or overwrite future schema versions', async () => {
+    const future = { version: 99, theme: 'future', untouched: true };
+    writeFileSync(path.join(configRoot, 'config.json'), JSON.stringify(future), 'utf8');
+    const snapshot = await configStore.loadSnapshot();
+    expect(snapshot.warnings.some((warning) => warning.includes('newer schema version'))).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'config.json'), 'utf8'))).toEqual(future);
+  });
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -38,6 +38,7 @@ describe('project filesystem boundaries', () => {
     await expect(projectService.readFile(project, '.env', {
       rules: [{ id: 'deny-env', type: 'file_access', pattern: '**/.env*', action: 'deny', enabled: true }],
     })).rejects.toThrow();
+    await expect(projectService.readFile(project, '.env', null)).rejects.toThrow('Environment files');
   });
 
   it('rejects traversal and symlink escapes', async () => {
@@ -47,9 +48,13 @@ describe('project filesystem boundaries', () => {
     await writeFile(path.join(outside, 'secret.txt'), 'outside\n');
     await symlink(path.join(outside, 'secret.txt'), path.join(project.path, 'link.txt'));
     await symlink(outside, path.join(project.path, 'escape'));
+    await mkdir(path.join(project.path, 'linked'), { recursive: true });
+    await writeFile(path.join(project.path, 'target.md'), '# Target\n');
+    await symlink(path.join(project.path, 'target.md'), path.join(project.path, 'linked', 'AGENTS.md'));
     await expect(projectService.readFile(project, '../secret.txt', null)).rejects.toThrow();
     await expect(projectService.readFile(project, 'link.txt', null)).rejects.toThrow();
     await expect(projectService.writeInstruction(project, 'escape/AGENTS.md', '# Escape\n', false, path.join(project.path, 'global.md'))).rejects.toThrow();
+    await expect(projectService.writeInstruction(project, 'linked/AGENTS.md', '# Linked\n', false, path.join(project.path, 'global.md'))).rejects.toThrow('existing symlink');
   });
 
   it('discovers and atomically creates scoped instruction files', async () => {
