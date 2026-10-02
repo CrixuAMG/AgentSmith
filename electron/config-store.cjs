@@ -129,7 +129,7 @@ function validDocument(value, kind) {
   return false;
 }
 
-function migrateDocument(value, kind) {
+function migrateDocument(value) {
   if (!isObject(value)) return null;
   if (value.version === 1) return value;
   // Version zero was the un-migrated shape used by the first development build.
@@ -173,7 +173,7 @@ async function readJson(filePath, fallback, warnings, kind = 'generic') {
       warnings.push(`Configuration warning: ${path.basename(filePath)} uses a newer schema version and was left untouched.`);
       return clone(fallback);
     }
-    const migrated = migrateDocument(parsed, kind);
+    const migrated = migrateDocument(parsed);
     if (!migrated || !validDocument(migrated, kind)) throw new Error('invalid schema');
     if (migrated !== parsed) await writeAtomic(filePath, migrated);
     return migrated;

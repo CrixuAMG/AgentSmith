@@ -132,7 +132,7 @@ async function togglePromptFile() {
 }
 
 async function selectChange(change: NonNullable<typeof store.git>['changes'][number]) {
-  if (!project.value || change.kind === 'deleted') return;
+  if (!project.value) return;
   diffLoading.value = true;
   localError.value = null;
   try {
@@ -253,7 +253,7 @@ onMounted(() => { if (project.value && store.treeLoadedFor !== project.value.id)
               <div v-else class="file-tree" role="tree"><FileTreeNode v-for="node in store.tree" :key="node.relativePath" :node="node" :selected-path="store.selectedFilePath" @select="selectFile" /></div>
               <div class="tree-footer mono">{{ t('workspace.readOnly') }} · {{ t('workspace.gitignoreAware') }}</div>
             </div>
-             <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" :context-selected="store.selectedFilePath ? store.promptFiles.some((file) => file.path === store.selectedFilePath) : false" @toggle-context="togglePromptFile" />
+            <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" :context-selected="store.selectedFilePath ? store.promptFiles.some((file) => file.path === store.selectedFilePath) : false" @toggle-context="togglePromptFile" />
           </div>
 
           <div v-else-if="store.workspaceTab === 'git'" class="git-layout">
