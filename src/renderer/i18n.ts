@@ -1,0 +1,88 @@
+import { createI18n } from 'vue-i18n';
+
+const messages = {
+  en: {
+    app: {
+      name: 'AgentSmith',
+      tagline: 'Local command center for AI-assisted development',
+      loading: 'Loading workspace',
+    },
+    nav: {
+      workspace: 'Workspace',
+      dashboard: 'Dashboard',
+      projects: 'Projects',
+      promptStudio: 'Prompt Studio',
+      agentProfiles: 'Agent Profiles',
+      personalization: 'Personalization',
+      goals: 'Goals',
+      guardrails: 'Guardrails',
+      settings: 'Settings',
+    },
+    shell: {
+      local: 'LOCAL',
+      project: 'Project',
+      noProject: 'No project selected',
+      openProject: 'Open project',
+      commandPalette: 'Command palette',
+      theme: 'Toggle theme',
+    },
+    dashboard: {
+      eyebrow: 'OPERATIONS / OVERVIEW',
+      title: 'Your development command center.',
+      intro: 'Compose transparent requests, keep project context close, and let the local tools do the work.',
+      newTask: 'Start a new task',
+      inspectProject: 'Inspect a project',
+      activeProject: 'Active project',
+      recentProjects: 'Recent projects',
+      noProjects: 'No projects registered yet.',
+      addFirst: 'Add your first project',
+      profile: 'Active profile',
+      goals: 'Goals enabled',
+      guardrails: 'Guardrails',
+      instructions: 'Global instructions',
+      ready: 'Ready for a task',
+      readyDetail: 'Select a project and shape the request in Prompt Studio.',
+    },
+    common: {
+      save: 'Save changes',
+      cancel: 'Cancel',
+      close: 'Close',
+      add: 'Add',
+      edit: 'Edit',
+      delete: 'Delete',
+      create: 'Create',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      back: 'Back',
+      refresh: 'Refresh',
+      search: 'Search',
+      copy: 'Copy',
+      copied: 'Copied',
+      loading: 'Loading',
+      unavailable: 'Unavailable',
+      verified: 'Verified',
+      manual: 'Manual',
+      none: 'None',
+      name: 'Name',
+      description: 'Description',
+      instructions: 'Instructions',
+      status: 'Status',
+      path: 'Path',
+      remove: 'Remove',
+      confirm: 'Confirm',
+    },
+    foundation: {
+      unavailableTitle: 'This workspace is not available yet',
+      unavailableDetail: 'Choose a project or open Prompt Studio to begin.',
+    },
+  },
+} as const;
+
+export const i18n = createI18n({
+  legacy: false,
+  locale: 'en',
+  fallbackLocale: 'en',
+  messages,
+});
+
+export default i18n;
