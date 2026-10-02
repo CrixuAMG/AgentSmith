@@ -156,6 +156,7 @@
 .diff-content { min-height: 100%; margin: 0; padding: 22px; color: var(--text-soft); font: 11px/1.65 'DM Mono', monospace; white-space: pre-wrap; }
 .instructions-layout { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 1.45fr); }
 .instructions-list { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+.instructions-warning { margin: 10px 13px 0; padding: 9px 10px; border: 1px solid rgba(233, 210, 141, .22); background: rgba(233, 210, 141, .06); color: var(--yellow); font-size: 10px; line-height: 1.5; }
 .instruction-item { width: 100%; display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 9px; padding: 11px 13px; border: 0; background: transparent; color: var(--text-soft); text-align: left; cursor: pointer; }
 .instruction-item:hover, .instruction-item.selected { background: var(--green-dim); color: var(--text); }
 .instruction-item > span:last-child { display: grid; gap: 5px; min-width: 0; }

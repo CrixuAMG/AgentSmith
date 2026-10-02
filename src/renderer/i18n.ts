@@ -143,6 +143,7 @@ const messages = {
       select: 'Select an instruction file',
       editorPlaceholder: 'Write the instructions that apply at this scope.',
       atomicNotice: 'Atomic writes · existing files are backed up before replacement',
+      overlapWarning: 'Multiple instruction scopes apply to this project. Review parent and nested files for duplicated or conflicting rules.',
       scope: {
         global: 'Canonical global instructions',
         project: 'Project root scope',

@@ -36,6 +36,14 @@ const groupedChanges = computed(() => {
   }
   return [...groups.entries()];
 });
+const instructionOverlapWarning = computed(() => {
+  const paths = store.instructions.filter((item) => item.scope !== 'global').map((item) => item.relativePath === 'AGENTS.md' ? '' : item.relativePath.replace(/\/AGENTS\.md$/, ''));
+  const hasNestedOverlap = paths.some((path) => path && paths.some((other) => other !== path && other.startsWith(`${path}/`)));
+  const hasRootOverlap = paths.includes('') && paths.some(Boolean);
+  return hasNestedOverlap || hasRootOverlap
+    ? t('instructions.overlapWarning')
+    : null;
+});
 
 async function loadWorkspace() {
   if (!project.value) return;
@@ -280,7 +288,7 @@ onMounted(() => {
           </div>
 
           <div v-else class="instructions-layout">
-            <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="selectInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
+            <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="selectInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
             <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !instructionDirty" @click="saveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="instructionDirty = true"></textarea><div class="editor-footer mono">{{ t('instructions.atomicNotice') }}</div></div>
           </div>
         </template>
