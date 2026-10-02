@@ -96,6 +96,10 @@ function formatTree(nodes: typeof store.tree, depth = 0): string {
   }).join('\n');
 }
 
+function hasProjectFile(relativePath: string, nodes: typeof store.tree = store.tree): boolean {
+  return nodes.some((node) => node.relativePath === relativePath || (node.children ? hasProjectFile(relativePath, node.children) : false));
+}
+
 function applyProfileDefaults() {
   const profile = store.snapshot?.profiles.find((item) => item.id === store.snapshot?.config.activeProfileId) ?? store.snapshot?.profiles[0];
   if (!profile) return;
@@ -124,6 +128,7 @@ async function loadContext() {
     const nestedContents = await Promise.all(nestedFiles.map(async (item) => `### ${item.relativePath}\n${await api.readInstruction(project.value!, item.relativePath)}`));
     nestedInstructionText.value = nestedContents.join('\n\n');
     const readOptional = async (relativePath: string) => {
+      if (!hasProjectFile(relativePath)) return '';
       try {
         return (await api.readFile(project.value!, relativePath, activeGuardrails())).content;
       } catch {
