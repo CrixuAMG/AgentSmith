@@ -9,7 +9,7 @@ const configRoot = mkdtempSync(path.join(os.tmpdir(), 'agentsmith-config-'));
 process.env.AGENTSMITH_CONFIG_ROOT = configRoot;
 const require = createRequire(import.meta.url);
 const configStore = require('../../electron/config-store.cjs') as {
-  loadSnapshot: () => Promise<{ config: { theme: string; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
+  loadSnapshot: () => Promise<{ config: { theme: string; maxConcurrentJobs: number; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
   saveResource: (key: string, value: unknown) => Promise<void>;
 };
 
@@ -23,6 +23,7 @@ describe('configuration storage', () => {
     const initial = await configStore.loadSnapshot();
     expect(initial.storageRoot).toBe(configRoot);
     expect(initial.config.theme).toBe('dark');
+    expect(initial.config.maxConcurrentJobs).toBe(2);
     await configStore.saveResource('config', { ...initial.config, theme: 'light' });
     const saved = await configStore.loadSnapshot();
     expect(saved.config.theme).toBe('light');

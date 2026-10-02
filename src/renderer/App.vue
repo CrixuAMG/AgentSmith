@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage.vue';
 import AgentProfilesPage from './pages/AgentProfilesPage.vue';
 import PersonalizationPage from './pages/PersonalizationPage.vue';
 import PromptStudioPage from './pages/PromptStudioPage.vue';
+import PromptJobPage from './pages/PromptJobPage.vue';
 import ProjectsPage from './pages/ProjectsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { initializeStore, persist, selectedProject, store } from './services/store';
@@ -20,6 +21,7 @@ const navigation = computed(() => [
   { id: 'dashboard' as const, label: t('nav.dashboard'), icon: '⌂' },
   { id: 'projects' as const, label: t('nav.projects'), icon: '⌘' },
   { id: 'prompt-studio' as const, label: t('nav.promptStudio'), icon: '>' },
+  { id: 'prompt-job' as const, label: t('nav.promptJob'), icon: '◌' },
   { id: 'agent-profiles' as const, label: t('nav.agentProfiles'), icon: '◎' },
   { id: 'personalization' as const, label: t('nav.personalization'), icon: '✦' },
   { id: 'settings' as const, label: t('nav.settings'), icon: '⚙' },
@@ -99,6 +101,7 @@ onMounted(load);
         <DashboardPage v-if="store.activeView === 'dashboard'" @navigate="selectView" />
         <ProjectsPage v-else-if="store.activeView === 'projects'" />
         <PromptStudioPage v-else-if="store.activeView === 'prompt-studio'" />
+        <PromptJobPage v-else-if="store.activeView === 'prompt-job'" />
         <AgentProfilesPage v-else-if="store.activeView === 'agent-profiles'" />
         <PersonalizationPage v-else-if="store.activeView === 'personalization'" />
         <SettingsPage v-else-if="store.activeView === 'settings'" />

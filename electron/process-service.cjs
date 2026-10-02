@@ -5,8 +5,15 @@ const { canonicalRoot } = require('./project-service.cjs');
 const { buildExecutionCommand, discoverProviders } = require('./provider-service.cjs');
 
 const activeProcesses = new Map();
+let startingProcesses = 0;
 const cancellationTimers = new Map();
 const cancellationGracePeriod = 2000;
+const defaultMaxConcurrentJobs = 2;
+
+function normalizeMaxConcurrentJobs(value) {
+  if (!Number.isInteger(value)) return defaultMaxConcurrentJobs;
+  return Math.min(Math.max(value, 1), 10);
+}
 
 function closeProcessInput(child) {
   child.stdin?.end();
@@ -21,18 +28,34 @@ function evaluateExecutionGuardrails(request) {
   if (denied) throw new Error(denied.description || `Execution blocked by guardrail ${denied.id}.`);
 }
 
-async function startProcess(request, emit) {
+async function startProcess(request, emit, maxConcurrentJobs = defaultMaxConcurrentJobs) {
   evaluateExecutionGuardrails(request);
-  const root = await canonicalRoot({ path: request.projectPath });
-  const discovery = await discoverProviders();
-  const configuration = buildExecutionCommand({ ...request, projectPath: root }, discovery);
-  const executionId = crypto.randomUUID();
-  const child = spawn(configuration.executable, configuration.args, {
-    cwd: root,
-    shell: false,
-    windowsHide: true,
-    env: process.env,
-  });
+  const limit = normalizeMaxConcurrentJobs(maxConcurrentJobs);
+  if (activeProcesses.size + startingProcesses >= limit) {
+    throw new Error(`Maximum concurrent jobs reached (${limit}).`);
+  }
+  startingProcesses += 1;
+  let root;
+  let discovery;
+  let configuration;
+  let executionId;
+  let child;
+  try {
+    root = await canonicalRoot({ path: request.projectPath });
+    discovery = await discoverProviders();
+    configuration = buildExecutionCommand({ ...request, projectPath: root }, discovery);
+    executionId = crypto.randomUUID();
+    child = spawn(configuration.executable, configuration.args, {
+      cwd: root,
+      shell: false,
+      windowsHide: true,
+      env: process.env,
+    });
+  } catch (error) {
+    startingProcesses -= 1;
+    throw error;
+  }
+  startingProcesses -= 1;
   // The prompt is passed as an argument. Close the unused pipe so one-shot
   // provider CLIs do not wait indefinitely for more stdin input.
   closeProcessInput(child);
@@ -89,4 +112,4 @@ function cancelAllProcesses() {
   for (const executionId of activeProcesses.keys()) void cancelProcess(executionId);
 }
 
-module.exports = { startProcess, cancelProcess, cancelAllProcesses, evaluateExecutionGuardrails, closeProcessInput };
+module.exports = { startProcess, cancelProcess, cancelAllProcesses, evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs };

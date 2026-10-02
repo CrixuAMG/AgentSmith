@@ -4,6 +4,7 @@ export type ViewId =
   | 'dashboard'
   | 'projects'
   | 'prompt-studio'
+  | 'prompt-job'
   | 'agent-profiles'
   | 'personalization'
   | 'settings';
@@ -24,6 +25,7 @@ export interface AppConfig {
   showHiddenFiles: boolean;
   lastProjectId: string | null;
   activeProfileId: string | null;
+  maxConcurrentJobs: number;
   layout: WorkspaceLayout;
 }
 
@@ -334,6 +336,18 @@ export interface ExecutionEvent {
   text?: string;
   exitCode?: number | null;
   providerId?: string;
+}
+
+export interface PromptJob {
+  id: string;
+  projectId: string;
+  historyEntryId: string;
+  task: string;
+  state: 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled';
+  executionId: string | null;
+  command: string | null;
+  output: Array<{ kind: 'stdout' | 'stderr' | 'system' | 'error'; text: string }>;
+  exitCode: number | null;
 }
 
 export interface AppSnapshot {

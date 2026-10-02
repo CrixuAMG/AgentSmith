@@ -7,7 +7,7 @@ import { composePrompt } from '@/shared/prompt-composer';
 import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
 import type { FeatureSuggestion, Model, PromptContextOptions, ProviderDiscovery, PromptHistoryEntry, Role } from '@/shared/types';
 import { api, onProcessEvent } from '../services/api';
-import { activeGuardrails, selectedProject, selectProject, store } from '../services/store';
+import { activeGuardrails, addPromptJob, registerPromptJobExecution, selectedProject, selectProject, store } from '../services/store';
 
 const { t } = useI18n();
 const project = computed(selectedProject);
@@ -302,14 +302,23 @@ async function confirmExecution() {
     historyEntryId.value = null;
     return;
   }
+  const jobId = `job-${entry.id}`;
+  addPromptJob({ id: jobId, projectId: project.value.id, historyEntryId: entry.id, task: entry.task, state: 'running', executionId: null, command: null, output: [{ kind: 'system', text: `${t('prompt.running')} · ${project.value.path}` }], exitCode: null });
   try {
     const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value });
     executionId.value = result.executionId;
     executionCommand.value = result.command;
+    const job = store.jobs.find((item) => item.id === jobId);
+    if (job) { job.command = result.command; job.output.push({ kind: 'system', text: result.command }); }
+    registerPromptJobExecution(jobId, result.executionId);
     appendOutput('system', result.command);
     await saveHistoryEntry({ command: result.command });
+    store.activeJobId = jobId;
+    store.activeView = 'prompt-job';
   } catch (error) {
     executionState.value = 'failed';
+    const job = store.jobs.find((item) => item.id === jobId);
+    if (job) { job.state = 'failed'; job.output.push({ kind: 'error', text: error instanceof Error ? error.message : String(error) }); }
     await saveHistoryEntry({ status: 'failed' });
     localError.value = error instanceof Error ? error.message : String(error);
   }

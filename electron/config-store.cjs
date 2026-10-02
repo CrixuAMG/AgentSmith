@@ -37,6 +37,7 @@ const layoutLimits = {
   railWidth: { min: 180, max: 420 },
   explorerRatio: { min: 0.2, max: 0.6 },
 };
+const maxConcurrentJobsLimits = { min: 1, max: 10 };
 
 function validRule(value) {
   return isObject(value)
@@ -140,12 +141,16 @@ function validLayout(value) {
 function normalizeDocument(value, kind) {
   if (kind !== 'config' || !isObject(value)) return value;
   const layout = sanitizeLayout(value.layout);
+  const maxConcurrentJobs = typeof value.maxConcurrentJobs === 'number' && Number.isFinite(value.maxConcurrentJobs)
+    ? Math.round(Math.min(Math.max(value.maxConcurrentJobs, maxConcurrentJobsLimits.min), maxConcurrentJobsLimits.max))
+    : defaultConfig.maxConcurrentJobs;
   const current = isObject(value.layout) ? value.layout : {};
   if (current.version === layout.version
     && current.railWidth === layout.railWidth
     && current.explorerRatio === layout.explorerRatio
-    && current.tab === layout.tab) return value;
-  return { ...value, layout };
+    && current.tab === layout.tab
+    && value.maxConcurrentJobs === maxConcurrentJobs) return value;
+  return { ...value, layout, maxConcurrentJobs };
 }
 
 function validConfig(value) {
@@ -156,6 +161,8 @@ function validConfig(value) {
     && isBoolean(value.showHiddenFiles)
     && (value.lastProjectId === null || isString(value.lastProjectId))
     && (value.activeProfileId === null || isString(value.activeProfileId))
+    && typeof value.maxConcurrentJobs === 'number' && Number.isInteger(value.maxConcurrentJobs)
+    && value.maxConcurrentJobs >= maxConcurrentJobsLimits.min && value.maxConcurrentJobs <= maxConcurrentJobsLimits.max
     && validLayout(value.layout);
 }
 

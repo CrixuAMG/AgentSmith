@@ -45,6 +45,8 @@ export function isAppConfig(value: unknown): value is AppConfig {
     && isBoolean(value.showHiddenFiles)
     && (value.lastProjectId === null || isString(value.lastProjectId))
     && (value.activeProfileId === null || isString(value.activeProfileId))
+    && isBoundedNumber(value.maxConcurrentJobs, { min: 1, max: 10 })
+    && Number.isInteger(value.maxConcurrentJobs)
     && isWorkspaceLayout(value.layout);
 }
 

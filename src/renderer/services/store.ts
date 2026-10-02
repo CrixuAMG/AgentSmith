@@ -3,9 +3,11 @@ import { reactive } from 'vue';
 import type {
   AppSnapshot,
   FileReadResult,
+  ExecutionEvent,
   GitStatus,
   InstructionFile,
   ProjectFileNode,
+  PromptJob,
   ResourceKey,
   ViewId,
   WorkspaceLayout,
@@ -34,7 +36,12 @@ export const store = reactive({
   selectedInstructionPath: null as string | null,
   selectedInstructionContent: '',
   error: null as string | null,
+  jobs: [] as PromptJob[],
+  activeJobId: null as string | null,
 });
+
+const earlyProcessEvents = new Map<string, ExecutionEvent>();
+let removeProcessListener: (() => void) | null = null;
 
 export async function initializeStore() {
   store.snapshot = await api.loadSnapshot();
@@ -42,6 +49,55 @@ export async function initializeStore() {
   store.workspaceTab = store.snapshot.config.layout.tab;
   document.documentElement.dataset.theme = store.snapshot.config.theme;
   applyLayoutVariables();
+  if (!removeProcessListener) removeProcessListener = api.onProcessEvent(handleProcessEvent);
+}
+
+export function addPromptJob(job: PromptJob) {
+  store.jobs.unshift(job);
+}
+
+export function registerPromptJobExecution(jobId: string, executionId: string) {
+  const job = store.jobs.find((item) => item.id === jobId);
+  if (!job) return;
+  job.executionId = executionId;
+  const earlyEvent = earlyProcessEvents.get(executionId);
+  if (earlyEvent) {
+    earlyProcessEvents.delete(executionId);
+    applyProcessEvent(job, earlyEvent);
+  }
+}
+
+function handleProcessEvent(event: ExecutionEvent) {
+  const job = store.jobs.find((item) => item.executionId === event.executionId);
+  if (!job) {
+    if (event.kind === 'started') earlyProcessEvents.set(event.executionId, event);
+    return;
+  }
+  applyProcessEvent(job, event);
+}
+
+function applyProcessEvent(job: PromptJob, event: ExecutionEvent) {
+  if (event.kind === 'started') job.state = 'running';
+  if (event.kind === 'stdout' || event.kind === 'stderr') job.output.push({ kind: event.kind, text: event.text ?? '' });
+  if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
+    job.state = event.kind;
+    job.exitCode = event.exitCode ?? null;
+    if (event.text) job.output.push({ kind: 'error', text: event.text });
+    void saveJobHistory(job);
+  }
+}
+
+async function saveJobHistory(job: PromptJob) {
+  if (!store.snapshot) return;
+  const entries = store.snapshot.promptHistory[job.projectId] ?? [];
+  const index = entries.findIndex((entry) => entry.id === job.historyEntryId);
+  if (index < 0) return;
+  entries[index] = { ...entries[index], status: job.state === 'preparing' || job.state === 'running' ? 'started' : job.state, exitCode: job.exitCode };
+  try {
+    await api.saveResource('promptHistory', store.snapshot.promptHistory);
+  } catch (error) {
+    store.error = error instanceof Error ? error.message : String(error);
+  }
 }
 
 export async function persist(key: ResourceKey, value: unknown) {

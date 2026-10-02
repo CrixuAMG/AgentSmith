@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   showHiddenFiles: false,
   lastProjectId: null,
   activeProfileId: 'default-agent',
+  maxConcurrentJobs: 2,
   layout: structuredClone(DEFAULT_WORKSPACE_LAYOUT),
 };
 

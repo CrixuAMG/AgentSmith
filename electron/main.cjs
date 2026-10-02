@@ -57,7 +57,10 @@ app.whenReady().then(() => {
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('providers:discover', () => discoverProviders());
   ipcMain.handle('suggestions:save', (_event, project, content) => saveSuggestion(path.join(storageRoot, 'suggestions'), project, content));
-  ipcMain.handle('process:start', (_event, request) => startProcess(request, (payload) => mainWindow?.webContents.send('process:event', payload)));
+  ipcMain.handle('process:start', async (_event, request) => {
+    const snapshot = await loadSnapshot();
+    return startProcess(request, (payload) => mainWindow?.webContents.send('process:event', payload), snapshot.config.maxConcurrentJobs);
+  });
   ipcMain.handle('process:cancel', (_event, executionId) => cancelProcess(executionId));
   createWindow();
   app.on('activate', () => {

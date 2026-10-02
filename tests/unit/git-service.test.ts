@@ -62,4 +62,3 @@ describe('Git branch listing parsing', () => {
     ]);
   });
 });
-});

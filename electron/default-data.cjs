@@ -12,6 +12,7 @@ const defaultConfig = {
   showHiddenFiles: false,
   lastProjectId: null,
   activeProfileId: 'default-agent',
+  maxConcurrentJobs: 2,
   layout: defaultLayout,
 };
 
