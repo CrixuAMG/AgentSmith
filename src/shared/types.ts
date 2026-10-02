@@ -181,6 +181,43 @@ export interface GitStatus {
   error: string | null;
 }
 
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitLog {
+  isRepository: boolean;
+  branch: string | null;
+  commits: GitCommit[];
+  error: string | null;
+}
+
+export interface GitBranch {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  date: string | null;
+}
+
+export interface GitBranchList {
+  isRepository: boolean;
+  current: string | null;
+  branches: GitBranch[];
+  error: string | null;
+}
+
+export interface GitPushResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface InstructionFile {
   relativePath: string;
   absolutePath: string;
@@ -325,6 +362,9 @@ export interface AgentSmithApi {
   readFile(project: Project, relativePath: string, guardrails: GuardrailProfile | null): Promise<FileReadResult>;
   gitStatus(project: Project): Promise<GitStatus>;
   gitDiff(project: Project, relativePath: string, staged: boolean): Promise<string>;
+  gitLog(project: Project, options: { branch?: string | null; limit: number }): Promise<GitLog>;
+  gitBranches(project: Project): Promise<GitBranchList>;
+  gitPush(project: Project): Promise<GitPushResult>;
   listInstructions(project: Project): Promise<InstructionFile[]>;
   readInstruction(project: Project, relativePath: string): Promise<string>;
   writeInstruction(project: Project, relativePath: string, content: string, overwrite: boolean): Promise<void>;

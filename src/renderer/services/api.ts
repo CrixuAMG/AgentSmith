@@ -6,6 +6,9 @@ import type {
   AppSnapshot,
   ExecutionEvent,
   FileReadResult,
+  GitBranchList,
+  GitLog,
+  GitPushResult,
   GitStatus,
   GuardrailProfile,
   InstructionFile,
@@ -76,6 +79,15 @@ function browserApi(): AgentSmithApi {
     async gitDiff() {
       return 'Git inspection requires the desktop application.';
     },
+    async gitLog(): Promise<GitLog> {
+      return { isRepository: false, branch: null, commits: [], error: 'Git history requires the desktop application.' };
+    },
+    async gitBranches(): Promise<GitBranchList> {
+      return { isRepository: false, current: null, branches: [], error: 'Git history requires the desktop application.' };
+    },
+    async gitPush(): Promise<GitPushResult> {
+      return { ok: false, message: 'Git push requires the desktop application.' };
+    },
     async listInstructions(): Promise<InstructionFile[]> {
       return [];
     },
@@ -120,6 +132,9 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     readFile: (project, relativePath, guardrails) => bridge.readFile(toPlainIpcValue(project), relativePath, toPlainIpcValue(guardrails)),
     gitStatus: (project) => bridge.gitStatus(toPlainIpcValue(project)),
     gitDiff: (project, relativePath, staged) => bridge.gitDiff(toPlainIpcValue(project), relativePath, staged),
+    gitLog: (project, options) => bridge.gitLog(toPlainIpcValue(project), toPlainIpcValue(options)),
+    gitBranches: (project) => bridge.gitBranches(toPlainIpcValue(project)),
+    gitPush: (project) => bridge.gitPush(toPlainIpcValue(project)),
     listInstructions: (project) => bridge.listInstructions(toPlainIpcValue(project)),
     readInstruction: (project, relativePath) => bridge.readInstruction(toPlainIpcValue(project), relativePath),
     writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
