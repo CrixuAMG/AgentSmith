@@ -421,12 +421,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .prompt-heading .primary-button { min-height: 38px; }
 .prompt-config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .prompt-card, .prompt-section-card, .task-editor, .prompt-preview, .execution-panel { border: 1px solid var(--line); background: var(--panel); }
+.prompt-card, .prompt-section-card, .task-editor, .prompt-preview { min-width: 0; }
 .prompt-card { display: grid; gap: 11px; padding: 16px; }
 .prompt-card-heading { display: flex; align-items: start; justify-content: space-between; gap: 10px; color: var(--text-faint); }
 .prompt-card-heading .mono { color: var(--green); }
 .prompt-card select { width: 100%; padding: 8px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text); outline: 0; font-size: 12px; }
 .prompt-path { overflow: hidden; color: var(--text-faint); text-overflow: ellipsis; white-space: nowrap; }
-.prompt-main-grid { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+.prompt-main-grid { display: grid; grid-template-columns: minmax(260px, .28fr) minmax(0, 1fr); align-items: start; gap: 10px; margin-top: 10px; }
+.prompt-controls, .prompt-composer-area { min-width: 0; }
 .prompt-controls { display: grid; align-content: start; gap: 10px; }
 .prompt-section-card { padding: 16px; }
 .prompt-context-extra { margin-top: 10px; }
@@ -442,7 +444,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .context-hint { display: block; overflow: hidden; margin-top: 9px; color: var(--text-faint); font: 9px 'DM Mono', monospace; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-composer-area { display: grid; gap: 10px; min-width: 0; }
 .task-editor { display: flex; flex-direction: column; min-height: 188px; padding: 16px; }
-.task-editor textarea { flex: 1; min-height: 82px; resize: vertical; margin-top: 15px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.6; }
+.task-editor textarea { flex: 1; min-width: 0; min-height: 82px; resize: vertical; overflow: auto; margin-top: 15px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; line-height: 1.6; }
 .task-editor textarea::placeholder { color: var(--text-faint); }
 .task-footer { display: flex; justify-content: space-between; padding-top: 12px; color: var(--text-faint); }
 .prompt-preview { min-width: 0; overflow: hidden; }
@@ -450,12 +452,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .preview-header > div { display: flex; align-items: baseline; gap: 11px; }
 .preview-header strong { color: var(--text-faint); font: 10px 'DM Mono', monospace; }
 .preview-header .secondary-button { min-height: 30px; padding: 0 9px; }
-.preview-sections { display: flex; gap: 0; overflow: auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.preview-sections { display: flex; min-width: 0; max-width: 100%; gap: 0; overflow: auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .preview-section-tab { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; padding: 11px 8px; border: 0; background: transparent; color: var(--text-faint); font-size: 10px; cursor: pointer; }
 .preview-section-tab span { font: 10px 'DM Mono', monospace; }
 .preview-section-tab.included { color: var(--text-soft); }
 .preview-section-tab.active { color: var(--green); box-shadow: inset 0 -2px var(--green-strong); }
-.selected-section { min-height: 215px; padding: 16px; }
+.selected-section { min-width: 0; min-height: 215px; overflow: hidden; padding: 16px; }
 .selected-section-heading { display: flex; justify-content: space-between; margin-bottom: 12px; color: var(--green); font: 10px 'DM Mono', monospace; }
 .selected-section-heading .mono { color: var(--text-faint); }
 .selected-section pre, .full-prompt-details pre { max-height: 260px; overflow: auto; margin: 0; color: var(--text-soft); font: 10px/1.7 'DM Mono', monospace; white-space: pre-wrap; }
