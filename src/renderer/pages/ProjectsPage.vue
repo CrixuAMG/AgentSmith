@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import type { Project, ProjectFileNode } from '@/shared/types';
+import { LAYOUT_LIMITS } from '@/shared/layout';
 import FileTreeNode from '../components/FileTreeNode.vue';
 import FileViewer from '../components/FileViewer.vue';
 import { api } from '../services/api';
 import { fuzzySearch, indexProjectTree, type SearchEntry } from '../services/file-search';
-import { activeGuardrails, clearWorkspace, persist, selectProject, selectedProject, store } from '../services/store';
+import {
+  activeGuardrails,
+  clearWorkspace,
+  persist,
+  persistLayout,
+  resetLayout,
+  selectProject,
+  selectWorkspaceTab,
+  selectedProject,
+  store,
+  updateLayout,
+} from '../services/store';
 
 const { t } = useI18n();
 const projects = computed(() => store.snapshot?.projects ?? []);
@@ -21,6 +33,11 @@ const newInstructionPath = ref('');
 const instructionDraft = ref('');
 const instructionDirty = ref(false);
 const diffLoading = ref(false);
+const treePanel = ref<HTMLElement | null>(null);
+const resizing = ref<'rail' | 'explorer' | null>(null);
+
+const railWidth = computed(() => store.snapshot?.config.layout.railWidth ?? LAYOUT_LIMITS.railWidth.min);
+const explorerRatio = computed(() => store.snapshot?.config.layout.explorerRatio ?? 0.335);
 
 const searchResults = computed(() => {
   if (!search.value.trim()) return [];
@@ -218,6 +235,67 @@ function handleSearchKeydown(event: KeyboardEvent) {
   }
 }
 
+const RAIL_STEP = 16;
+const EXPLORER_STEP = 0.02;
+let dragStart: { pointerId: number; kind: 'rail' | 'explorer'; originX: number; originValue: number } | null = null;
+
+function startResize(kind: 'rail' | 'explorer', event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') return;
+  event.preventDefault();
+  dragStart = {
+    pointerId: event.pointerId,
+    kind,
+    originX: event.clientX,
+    originValue: kind === 'rail' ? railWidth.value : (treePanel.value?.clientWidth ?? 0),
+  };
+  resizing.value = kind;
+  window.addEventListener('pointermove', handleResize);
+  window.addEventListener('pointerup', endResize);
+  window.addEventListener('pointercancel', endResize);
+}
+
+function handleResize(event: PointerEvent) {
+  if (!dragStart || event.pointerId !== dragStart.pointerId) return;
+  const delta = event.clientX - dragStart.originX;
+  if (dragStart.kind === 'rail') {
+    updateLayout({ railWidth: dragStart.originValue + delta });
+    return;
+  }
+  const available = treePanel.value?.parentElement?.clientWidth ?? 0;
+  if (available <= 0) return;
+  updateLayout({ explorerRatio: (dragStart.originValue + delta) / available });
+}
+
+async function endResize(event: PointerEvent) {
+  if (!dragStart || event.pointerId !== dragStart.pointerId) return;
+  dragStart = null;
+  resizing.value = null;
+  window.removeEventListener('pointermove', handleResize);
+  window.removeEventListener('pointerup', endResize);
+  window.removeEventListener('pointercancel', endResize);
+  await persistLayout();
+}
+
+function resizeWithKeyboard(kind: 'rail' | 'explorer', event: KeyboardEvent) {
+  const direction = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+  if (!direction && event.key !== 'Home' && event.key !== 'End') return;
+  event.preventDefault();
+  if (kind === 'rail') {
+    const limits = LAYOUT_LIMITS.railWidth;
+    const next = event.key === 'Home' ? limits.min : event.key === 'End' ? limits.max : railWidth.value + direction * RAIL_STEP;
+    updateLayout({ railWidth: next });
+  } else {
+    const limits = LAYOUT_LIMITS.explorerRatio;
+    const next = event.key === 'Home' ? limits.min : event.key === 'End' ? limits.max : explorerRatio.value + direction * EXPLORER_STEP;
+    updateLayout({ explorerRatio: next });
+  }
+  void persistLayout();
+}
+
+async function restoreLayout() {
+  await resetLayout();
+}
+
 watch(search, () => { searchCursor.value = 0; });
 watch(project, () => { void loadWorkspace(); });
 onMounted(() => {
@@ -228,10 +306,15 @@ onMounted(() => {
   }
   if (project.value && store.treeLoadedFor !== project.value.id) void loadWorkspace();
 });
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', handleResize);
+  window.removeEventListener('pointerup', endResize);
+  window.removeEventListener('pointercancel', endResize);
+});
 </script>
 
 <template>
-  <div class="workspace-page">
+  <div class="workspace-page" :class="{ resizing: resizing !== null }">
     <div class="page-heading workspace-heading">
       <div><span class="eyebrow">{{ t('projects.eyebrow') }}</span><h1>{{ t('projects.title') }}</h1><p class="lead">{{ t('projects.intro') }}</p></div>
       <button class="primary-button" type="button" @click="addProject">+ {{ t('projects.add') }}</button>
@@ -250,6 +333,7 @@ onMounted(() => {
           <span class="eyebrow">{{ t('projects.selected') }}</span><strong>{{ project.name }}</strong><span class="mono">{{ project.path }}</span>
           <button class="danger-text-button" type="button" @click="removeProject(project.id)">{{ t('projects.remove') }}</button>
         </div>
+        <button class="layout-handle" type="button" role="separator" aria-orientation="vertical" :aria-label="t('layout.rail')" :aria-valuenow="railWidth" :aria-valuemin="LAYOUT_LIMITS.railWidth.min" :aria-valuemax="LAYOUT_LIMITS.railWidth.max" @pointerdown="startResize('rail', $event)" @keydown="resizeWithKeyboard('rail', $event)"></button>
       </aside>
 
       <section class="workspace-content">
@@ -259,15 +343,18 @@ onMounted(() => {
           <div v-if="store.error" class="inline-error" role="alert">{{ store.error }}</div>
           <div class="workspace-toolbar">
             <div class="workspace-tabs" role="tablist">
-              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'explorer' }" type="button" @click="store.workspaceTab = 'explorer'">{{ t('workspace.explorer') }}</button>
-              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'git' }" type="button" @click="store.workspaceTab = 'git'">{{ t('workspace.gitChanges') }} <span v-if="store.git?.changes.length" class="tab-count">{{ store.git.changes.length }}</span></button>
-              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'instructions' }" type="button" @click="store.workspaceTab = 'instructions'">{{ t('workspace.instructions') }} <span v-if="store.instructions.length" class="tab-count">{{ store.instructions.length }}</span></button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'explorer' }" type="button" @click="selectWorkspaceTab('explorer')">{{ t('workspace.explorer') }}</button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'git' }" type="button" @click="selectWorkspaceTab('git')">{{ t('workspace.gitChanges') }} <span v-if="store.git?.changes.length" class="tab-count">{{ store.git.changes.length }}</span></button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'instructions' }" type="button" @click="selectWorkspaceTab('instructions')">{{ t('workspace.instructions') }} <span v-if="store.instructions.length" class="tab-count">{{ store.instructions.length }}</span></button>
             </div>
-            <span v-if="busy" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span>
+            <div class="toolbar-actions">
+              <span v-if="busy" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span>
+              <button class="small-icon-button" type="button" :title="t('layout.resetTitle')" :aria-label="t('layout.reset')" @click="restoreLayout">↺</button>
+            </div>
           </div>
 
           <div v-if="store.workspaceTab === 'explorer'" class="explorer-layout">
-            <div class="tree-panel">
+            <div ref="treePanel" class="tree-panel">
               <div class="panel-toolbar"><label class="search-field"><span>⌕</span><input v-model="search" type="search" :placeholder="t('workspace.searchFiles')" @keydown="handleSearchKeydown"></label><button class="small-icon-button" type="button" :title="t('workspace.toggleHidden')" @click="store.snapshot!.config.showHiddenFiles = !store.snapshot!.config.showHiddenFiles; void persist('config', store.snapshot!.config); void loadWorkspace()">◌</button></div>
               <div v-if="search" class="search-results" role="listbox">
                 <button v-for="(node, index) in searchResults" :key="node.relativePath" class="search-result" :class="{ active: index === searchCursor }" type="button" @click="selectSearchResult(node)"><span>{{ node.kind === 'directory' ? '□' : '·' }}</span><span>{{ node.relativePath }}</span></button>
@@ -276,6 +363,7 @@ onMounted(() => {
               <div v-else-if="store.treeLoading" class="tree-empty"><span class="loading-pulse"></span>{{ t('workspace.scanning') }}</div>
               <div v-else class="file-tree" role="tree"><FileTreeNode v-for="node in store.tree" :key="node.relativePath" :node="node" :selected-path="store.selectedFilePath" @select="selectFile" /></div>
               <div class="tree-footer mono">{{ t('workspace.readOnly') }} · {{ t('workspace.gitignoreAware') }}</div>
+              <button class="layout-handle" type="button" role="separator" aria-orientation="vertical" :aria-label="t('layout.explorer')" :aria-valuenow="Math.round(explorerRatio * 100)" :aria-valuemin="Math.round(LAYOUT_LIMITS.explorerRatio.min * 100)" :aria-valuemax="Math.round(LAYOUT_LIMITS.explorerRatio.max * 100)" @pointerdown="startResize('explorer', $event)" @keydown="resizeWithKeyboard('explorer', $event)"></button>
             </div>
             <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" :context-selected="store.selectedFilePath ? store.promptFiles.some((file) => file.path === store.selectedFilePath) : false" @toggle-context="togglePromptFile" />
           </div>

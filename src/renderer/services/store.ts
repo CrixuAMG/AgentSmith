@@ -8,8 +8,10 @@ import type {
   ProjectFileNode,
   ResourceKey,
   ViewId,
+  WorkspaceLayout,
   WorkspaceTab,
 } from '@/shared/types';
+import { DEFAULT_WORKSPACE_LAYOUT, normalizeWorkspaceLayout } from '@/shared/layout';
 import { api } from './api';
 
 export const store = reactive({
@@ -36,7 +38,10 @@ export const store = reactive({
 
 export async function initializeStore() {
   store.snapshot = await api.loadSnapshot();
+  store.snapshot.config.layout = normalizeWorkspaceLayout(store.snapshot.config.layout);
+  store.workspaceTab = store.snapshot.config.layout.tab;
   document.documentElement.dataset.theme = store.snapshot.config.theme;
+  applyLayoutVariables();
 }
 
 export async function persist(key: ResourceKey, value: unknown) {
@@ -46,6 +51,42 @@ export async function persist(key: ResourceKey, value: unknown) {
 export async function persistConfig() {
   if (!store.snapshot) return;
   await persist('config', store.snapshot.config);
+}
+
+export function workspaceLayout(): WorkspaceLayout | null {
+  return store.snapshot?.config.layout ?? null;
+}
+
+function applyLayoutVariables() {
+  const layout = workspaceLayout();
+  if (!layout) return;
+  // CSS media queries collapse these panels on narrow viewports, so a stored
+  // desktop width never constrains a mobile layout.
+  document.documentElement.style.setProperty('--rail-width', `${layout.railWidth}px`);
+  document.documentElement.style.setProperty('--explorer-ratio', String(layout.explorerRatio));
+}
+
+export function updateLayout(patch: Partial<WorkspaceLayout>) {
+  if (!store.snapshot) return;
+  store.snapshot.config.layout = normalizeWorkspaceLayout({ ...store.snapshot.config.layout, ...patch });
+  applyLayoutVariables();
+}
+
+export async function persistLayout() {
+  await persistConfig();
+}
+
+export async function selectWorkspaceTab(tab: WorkspaceTab) {
+  if (!store.snapshot || store.workspaceTab === tab) return;
+  store.workspaceTab = tab;
+  updateLayout({ tab });
+  await persistLayout();
+}
+
+export async function resetLayout() {
+  updateLayout(structuredClone(DEFAULT_WORKSPACE_LAYOUT));
+  store.workspaceTab = store.snapshot?.config.layout.tab ?? 'explorer';
+  await persistLayout();
 }
 
 export function selectedProject() {

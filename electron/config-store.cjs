@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   defaultConfig,
+  defaultLayout,
   defaultGoals,
   defaultRoles,
   defaultGuardrails,
@@ -30,6 +31,12 @@ const isObject = (value) => value && typeof value === 'object' && !Array.isArray
 const isString = (value) => typeof value === 'string';
 const isBoolean = (value) => typeof value === 'boolean';
 const isStringArray = (value) => Array.isArray(value) && value.every(isString);
+
+const workspaceTabs = ['explorer', 'git', 'commits', 'instructions'];
+const layoutLimits = {
+  railWidth: { min: 180, max: 420 },
+  explorerRatio: { min: 0.2, max: 0.6 },
+};
 
 function validRule(value) {
   return isObject(value)
@@ -103,6 +110,44 @@ function validProviderSetting(value) {
     && isBoolean(value.enabled);
 }
 
+function clampLayoutDimension(value, limits, fallback) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, limits.min), limits.max);
+}
+
+// Layout is an allowlisted preference, not a schema to quarantine over: every field
+// is clamped or defaulted so a damaged value never makes the configuration unloadable.
+function sanitizeLayout(value) {
+  const source = isObject(value) ? value : {};
+  return {
+    version: 1,
+    railWidth: Math.round(clampLayoutDimension(source.railWidth, layoutLimits.railWidth, defaultLayout.railWidth)),
+    explorerRatio: Math.round(clampLayoutDimension(source.explorerRatio, layoutLimits.explorerRatio, defaultLayout.explorerRatio) * 1000) / 1000,
+    tab: workspaceTabs.includes(source.tab) ? source.tab : defaultLayout.tab,
+  };
+}
+
+function validLayout(value) {
+  return isObject(value)
+    && value.version === 1
+    && typeof value.railWidth === 'number' && Number.isFinite(value.railWidth)
+    && value.railWidth >= layoutLimits.railWidth.min && value.railWidth <= layoutLimits.railWidth.max
+    && typeof value.explorerRatio === 'number' && Number.isFinite(value.explorerRatio)
+    && value.explorerRatio >= layoutLimits.explorerRatio.min && value.explorerRatio <= layoutLimits.explorerRatio.max
+    && workspaceTabs.includes(value.tab);
+}
+
+function normalizeDocument(value, kind) {
+  if (kind !== 'config' || !isObject(value)) return value;
+  const layout = sanitizeLayout(value.layout);
+  const current = isObject(value.layout) ? value.layout : {};
+  if (current.version === layout.version
+    && current.railWidth === layout.railWidth
+    && current.explorerRatio === layout.explorerRatio
+    && current.tab === layout.tab) return value;
+  return { ...value, layout };
+}
+
 function validConfig(value) {
   return isObject(value)
     && value.version === 1
@@ -110,7 +155,8 @@ function validConfig(value) {
     && (value.theme === 'dark' || value.theme === 'light')
     && isBoolean(value.showHiddenFiles)
     && (value.lastProjectId === null || isString(value.lastProjectId))
-    && (value.activeProfileId === null || isString(value.activeProfileId));
+    && (value.activeProfileId === null || isString(value.activeProfileId))
+    && validLayout(value.layout);
 }
 
 function validProviderInstructions(value) {
@@ -199,9 +245,15 @@ async function readJson(filePath, fallback, warnings, kind = 'generic') {
       return clone(fallback);
     }
     const migrated = migrateDocument(parsed);
-    if (!migrated || !validDocument(migrated, kind)) throw new Error('invalid schema');
-    if (migrated !== parsed) await writeAtomic(filePath, migrated);
-    return migrated;
+    if (!migrated || !validDocument(normalizeDocument(migrated, kind), kind)) throw new Error('invalid schema');
+    if (migrated !== parsed) {
+      const rewritten = normalizeDocument(migrated, kind);
+      await writeAtomic(filePath, rewritten);
+      return rewritten;
+    }
+    const normalized = normalizeDocument(migrated, kind);
+    if (normalized !== migrated) await writeAtomic(filePath, normalized);
+    return normalized;
   } catch {
     const invalidPath = `${filePath}.invalid-${timestamp()}`;
     await fs.rename(filePath, invalidPath).catch(() => {});
@@ -303,8 +355,9 @@ async function saveResource(key, value) {
     return;
   }
   if (key === 'config') {
-    assertValidResource(key, value);
-    await writeAtomic(path.join(root, resourceFiles.config), { ...clone(value), version: 1 });
+    const config = isObject(value) ? normalizeDocument(clone(value), 'config') : value;
+    assertValidResource(key, config);
+    await writeAtomic(path.join(root, resourceFiles.config), { ...config, version: 1 });
     return;
   }
   if (key === 'projects') {

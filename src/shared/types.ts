@@ -8,7 +8,14 @@ export type ViewId =
   | 'personalization'
   | 'settings';
 
-export type WorkspaceTab = 'explorer' | 'git' | 'instructions';
+export type WorkspaceTab = 'explorer' | 'git' | 'commits' | 'instructions';
+
+export interface WorkspaceLayout {
+  version: 1;
+  railWidth: number;
+  explorerRatio: number;
+  tab: WorkspaceTab;
+}
 
 export interface AppConfig {
   version: number;
@@ -17,6 +24,7 @@ export interface AppConfig {
   showHiddenFiles: boolean;
   lastProjectId: string | null;
   activeProfileId: string | null;
+  layout: WorkspaceLayout;
 }
 
 export interface Project {

@@ -17,6 +17,8 @@
   --yellow: #e9d28d;
   --red: #ed9189;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  --rail-width: 245px;
+  --explorer-ratio: 0.335;
 }
 
 /* Application surfaces */
@@ -63,8 +65,12 @@
 .compact-empty { min-height: 155px; align-items: flex-start; }
 
 /* Workspace */
-.workspace-shell { display: grid; grid-template-columns: 245px minmax(0, 1fr); min-height: 650px; border: 1px solid var(--line); background: var(--panel); }
-.project-rail { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); background: rgba(7, 11, 9, .22); }
+.workspace-page.resizing { cursor: col-resize; user-select: none; }
+.workspace-shell { display: grid; grid-template-columns: var(--rail-width) minmax(0, 1fr); min-height: 650px; border: 1px solid var(--line); background: var(--panel); }
+.project-rail { position: relative; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); background: rgba(7, 11, 9, .22); }
+.layout-handle { position: absolute; top: 0; bottom: 0; right: -6px; width: 11px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.layout-handle::before { position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: transparent; content: ''; transition: background .15s; }
+.layout-handle:hover::before, .layout-handle:focus-visible::before { background: var(--green-strong); }
 :root[data-theme='light'] .project-rail { background: rgba(237, 243, 237, .72); }
 .rail-heading { display: flex; justify-content: space-between; padding: 18px 15px 13px; border-bottom: 1px solid var(--line); }
 .rail-heading > .mono { color: var(--text-faint); }
@@ -92,8 +98,9 @@
 .workspace-tab.active::after { background: var(--green-strong); }
 .tab-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; margin-left: 4px; padding: 0 4px; border-radius: 10px; background: var(--green-dim); color: var(--green); font: 9px 'DM Mono', monospace; }
 .toolbar-status { display: flex; align-items: center; gap: 7px; color: var(--text-faint); font: 10px 'DM Mono', monospace; }
+.toolbar-actions { display: flex; align-items: center; gap: 9px; }
 .inline-error { margin: 12px 17px 0; padding: 10px 12px; border: 1px solid rgba(237, 145, 137, .25); background: rgba(237, 145, 137, .08); color: var(--red); font-size: 11px; }
-.explorer-layout { display: grid; grid-template-columns: minmax(220px, .78fr) minmax(0, 1.55fr); min-height: 594px; }
+.explorer-layout { display: grid; grid-template-columns: minmax(200px, var(--explorer-ratio)fr) minmax(0, 1fr); min-height: 594px; }
 .tree-panel { position: relative; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .panel-toolbar { display: flex; align-items: center; gap: 7px; padding: 11px 10px; border-bottom: 1px solid var(--line); }
 .search-field { display: flex; align-items: center; flex: 1; gap: 7px; height: 30px; padding: 0 8px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text-faint); }
@@ -180,7 +187,7 @@
 @media (max-width: 1060px) {
   .dashboard-grid { grid-template-columns: 1fr 1fr; }
   .guardrail-panel { grid-column: span 2; min-height: 150px; }
-  .workspace-shell { grid-template-columns: 205px minmax(0, 1fr); }
+  .workspace-shell { grid-template-columns: clamp(180px, var(--rail-width), 260px) minmax(0, 1fr); }
 }
 
 @media (max-width: 760px) {
@@ -192,6 +199,7 @@
   .project-list { display: flex; gap: 6px; overflow: auto; }
   .project-list-item { min-width: 190px; }
   .rail-selected { display: none; }
+  .layout-handle { display: none; }
   .explorer-layout, .git-changes-layout, .instructions-layout { grid-template-columns: 1fr; }
   .tree-panel, .change-list, .instructions-list { min-height: 300px; border-right: 0; border-bottom: 1px solid var(--line); }
   .file-viewer, .diff-panel, .instruction-editor { min-height: 400px; }

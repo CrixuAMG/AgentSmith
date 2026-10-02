@@ -6,13 +6,28 @@ import type {
   ProviderSetting,
   Project,
   Role,
+  WorkspaceLayout,
+  WorkspaceTab,
 } from './types';
+import { LAYOUT_LIMITS, WORKSPACE_TABS } from './layout';
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isString = (value: unknown): value is string => typeof value === 'string';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+
+const isBoundedNumber = (value: unknown, limits: { min: number; max: number }): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= limits.min && value <= limits.max;
+
+export function isWorkspaceLayout(value: unknown): value is WorkspaceLayout {
+  return isRecord(value)
+    && value.version === 1
+    && isBoundedNumber(value.railWidth, LAYOUT_LIMITS.railWidth)
+    && isBoundedNumber(value.explorerRatio, LAYOUT_LIMITS.explorerRatio)
+    && isString(value.tab)
+    && WORKSPACE_TABS.includes(value.tab as WorkspaceTab);
+}
 
 export function isProject(value: unknown): value is Project {
   return isRecord(value)
@@ -29,7 +44,8 @@ export function isAppConfig(value: unknown): value is AppConfig {
     && (value.theme === 'dark' || value.theme === 'light')
     && isBoolean(value.showHiddenFiles)
     && (value.lastProjectId === null || isString(value.lastProjectId))
-    && (value.activeProfileId === null || isString(value.activeProfileId));
+    && (value.activeProfileId === null || isString(value.activeProfileId))
+    && isWorkspaceLayout(value.layout);
 }
 
 export function isGoal(value: unknown): value is Goal {

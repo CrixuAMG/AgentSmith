@@ -116,6 +116,14 @@ const messages = {
       gitignoreAware: '.gitignore aware',
       symlink: 'link',
     },
+    layout: {
+      reset: 'Reset layout',
+      resetTitle: 'Restore default panel sizes',
+      rail: 'Resize project rail',
+      explorer: 'Resize explorer panel',
+      railWidth: 'Project rail width',
+      explorerWidth: 'Explorer share',
+    },
     git: {
       branch: 'Current branch',
       changes: 'Changes',

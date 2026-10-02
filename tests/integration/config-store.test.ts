@@ -9,7 +9,7 @@ const configRoot = mkdtempSync(path.join(os.tmpdir(), 'agentsmith-config-'));
 process.env.AGENTSMITH_CONFIG_ROOT = configRoot;
 const require = createRequire(import.meta.url);
 const configStore = require('../../electron/config-store.cjs') as {
-  loadSnapshot: () => Promise<{ config: { theme: string }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
+  loadSnapshot: () => Promise<{ config: { theme: string; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
   saveResource: (key: string, value: unknown) => Promise<void>;
 };
 
@@ -35,6 +35,32 @@ describe('configuration storage', () => {
       id: 'run-1', executedAt: '2026-10-02T00:00:00.000Z', task: 'Inspect the project', prompt: 'Inspect the project', providerId: 'opencode', modelId: null, variant: {}, roleId: null, roleName: null, goalIds: [], guardrailProfileId: null, guardrailProfileName: null, command: 'opencode run', status: 'completed', exitCode: 0,
     }] });
     expect((await configStore.loadSnapshot()).promptHistory['project-1'][0].prompt).toBe('Inspect the project');
+  });
+
+  it('persists a workspace layout and repairs malformed layout values in place', async () => {
+    const initial = await configStore.loadSnapshot();
+    expect(initial.config.layout).toEqual({ version: 1, railWidth: 245, explorerRatio: 0.335, tab: 'explorer' });
+
+    await configStore.saveResource('config', { ...initial.config, layout: { version: 1, railWidth: 320, explorerRatio: 0.4, tab: 'git' } });
+    const saved = await configStore.loadSnapshot();
+    expect(saved.config.layout).toEqual({ version: 1, railWidth: 320, explorerRatio: 0.4, tab: 'git' });
+
+    // A document written before the layout existed keeps loading and gains defaults.
+    const legacy = { version: 1, locale: 'en', theme: 'light', showHiddenFiles: false, lastProjectId: null, activeProfileId: null };
+    writeFileSync(path.join(configRoot, 'config.json'), JSON.stringify(legacy), 'utf8');
+    const upgraded = await configStore.loadSnapshot();
+    expect(upgraded.config.theme).toBe('light');
+    expect(upgraded.config.layout).toEqual({ version: 1, railWidth: 245, explorerRatio: 0.335, tab: 'explorer' });
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'config.json'), 'utf8')).layout.tab).toBe('explorer');
+
+    // Out-of-range and unknown values are clamped instead of quarantining the whole config.
+    writeFileSync(path.join(configRoot, 'config.json'), JSON.stringify({ ...legacy, layout: { version: 7, railWidth: 'wide', explorerRatio: 99, tab: 'not-a-tab' } }), 'utf8');
+    const clamped = await configStore.loadSnapshot();
+    expect(clamped.warnings).toEqual([]);
+    expect(clamped.config.layout).toEqual({ version: 1, railWidth: 245, explorerRatio: 0.6, tab: 'explorer' });
+
+    await expect(configStore.saveResource('config', { ...legacy, layout: { version: 1, railWidth: 9999, explorerRatio: -4, tab: 'instructions' } })).resolves.toBeUndefined();
+    expect((await configStore.loadSnapshot()).config.layout).toEqual({ version: 1, railWidth: 420, explorerRatio: 0.2, tab: 'instructions' });
   });
 
   it('quarantines malformed JSON instead of crashing', async () => {

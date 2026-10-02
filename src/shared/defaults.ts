@@ -6,6 +6,7 @@ import type {
   ProviderSetting,
   Role,
 } from './types';
+import { DEFAULT_WORKSPACE_LAYOUT } from './layout';
 
 export const DEFAULT_CONFIG: AppConfig = {
   version: 1,
@@ -14,6 +15,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   showHiddenFiles: false,
   lastProjectId: null,
   activeProfileId: 'default-agent',
+  layout: structuredClone(DEFAULT_WORKSPACE_LAYOUT),
 };
 
 export const DEFAULT_GOALS: Goal[] = [

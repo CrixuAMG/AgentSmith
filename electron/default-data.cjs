@@ -1,3 +1,10 @@
+const defaultLayout = {
+  version: 1,
+  railWidth: 245,
+  explorerRatio: 0.335,
+  tab: 'explorer',
+};
+
 const defaultConfig = {
   version: 1,
   locale: 'en',
@@ -5,6 +12,7 @@ const defaultConfig = {
   showHiddenFiles: false,
   lastProjectId: null,
   activeProfileId: 'default-agent',
+  layout: defaultLayout,
 };
 
 const defaultGoals = [
@@ -174,4 +182,4 @@ const defaultProfiles = [{
   guardrailProfileId: 'default-security',
 }];
 
-module.exports = { defaultConfig, defaultGoals, defaultRoles, defaultGuardrails, defaultProviderSettings, defaultProfiles };
+module.exports = { defaultConfig, defaultLayout, defaultGoals, defaultRoles, defaultGuardrails, defaultProviderSettings, defaultProfiles };
