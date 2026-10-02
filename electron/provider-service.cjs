@@ -58,13 +58,59 @@ async function findExecutable(name) {
   return result.stdout.trim().split(/\r?\n/)[0];
 }
 
+function readJsonObject(lines, start) {
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  const parts = [];
+  for (let lineIndex = start; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    parts.push(line);
+    for (const character of line) {
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') quoted = true;
+    else if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return { json: parts.join('\n'), nextIndex: lineIndex };
+    }
+  }
+  }
+  return null;
+}
+
 function parseOpenCodeModels(output) {
-  return output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(line)).map((id) => ({
-    id,
-    name: id.split('/').slice(1).join('/'),
-    verified: true,
-    variants: [],
-  }));
+  const lines = output.split(/\r?\n/);
+  const models = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const id = lines[index].trim();
+    if (!/^[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(id)) continue;
+    let metadata = null;
+    let cursor = index + 1;
+    while (cursor < lines.length && !lines[cursor].trim()) cursor += 1;
+    if (lines[cursor]?.trim().startsWith('{')) {
+      const result = readJsonObject(lines, cursor);
+      if (result) {
+        try { metadata = JSON.parse(result.json); } catch { metadata = null; }
+        index = result.nextIndex;
+      }
+    }
+    const variants = metadata && metadata.variants && typeof metadata.variants === 'object'
+      ? Object.keys(metadata.variants).map((variantId) => ({ id: variantId, label: variantId, verified: true }))
+      : [];
+    models.push({
+      id,
+      name: metadata?.name || id.split('/').slice(1).join('/'),
+      verified: true,
+      variants,
+    });
+  }
+  return models;
 }
 
 async function detectOpenCode() {
@@ -78,11 +124,16 @@ async function detectOpenCode() {
     executionSupported: false,
   };
   const version = await run(executable, ['--version']);
-  const models = await run(executable, ['models']);
+  let models = await run(executable, ['models', '--verbose']);
+  let discoveredModels = parseOpenCodeModels(models.stdout);
+  if (models.code !== 0 || discoveredModels.length === 0) {
+    models = await run(executable, ['models']);
+    discoveredModels = parseOpenCodeModels(models.stdout);
+  }
   return {
     installation: { providerId: 'opencode', installed: true, executable, version: version.stdout.trim() || version.stderr.trim() || 'installed', error: null },
     capabilities: capabilities.opencode,
-    models: parseOpenCodeModels(models.stdout),
+    models: discoveredModels,
     modelDiscoveryAvailable: models.code === 0,
     note: models.code === 0 ? 'Models were read from the installed OpenCode CLI.' : 'OpenCode was found, but model discovery failed. Check provider diagnostics.',
     executionSupported: true,
@@ -137,4 +188,4 @@ function buildExecutionCommand(request, discovery) {
   throw new Error(`Unsupported provider: ${provider}.`);
 }
 
-module.exports = { discoverProviders, buildExecutionCommand, findExecutable, run };
+module.exports = { discoverProviders, buildExecutionCommand, findExecutable, run, parseOpenCodeModels };

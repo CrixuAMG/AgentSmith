@@ -129,6 +129,15 @@ function validDocument(value, kind) {
   return false;
 }
 
+function migrateDocument(value, kind) {
+  if (!isObject(value)) return null;
+  if (value.version === 1) return value;
+  // Version zero was the un-migrated shape used by the first development build.
+  // It intentionally keeps every unknown field while adding the current envelope version.
+  if (value.version === 0) return { ...value, version: 1 };
+  return null;
+}
+
 async function ensureRoot() {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   await Promise.all(directories.map((directory) => fs.mkdir(path.join(root, directory), { recursive: true, mode: 0o700 })));
@@ -160,8 +169,14 @@ async function readJson(filePath, fallback, warnings, kind = 'generic') {
   }
   try {
     const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    if (!validDocument(parsed, kind)) throw new Error('invalid schema');
-    return parsed;
+    if (isObject(parsed) && typeof parsed.version === 'number' && parsed.version > 1) {
+      warnings.push(`Configuration warning: ${path.basename(filePath)} uses a newer schema version and was left untouched.`);
+      return clone(fallback);
+    }
+    const migrated = migrateDocument(parsed, kind);
+    if (!migrated || !validDocument(migrated, kind)) throw new Error('invalid schema');
+    if (migrated !== parsed) await writeAtomic(filePath, migrated);
+    return migrated;
   } catch {
     const invalidPath = `${filePath}.invalid-${timestamp()}`;
     await fs.rename(filePath, invalidPath).catch(() => {});
@@ -169,6 +184,19 @@ async function readJson(filePath, fallback, warnings, kind = 'generic') {
     await writeAtomic(filePath, fallback);
     return clone(fallback);
   }
+}
+
+async function mergeEnvelope(filePath, patch) {
+  let existing = {};
+  if (await exists(filePath)) {
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    if (isObject(parsed) && typeof parsed.version === 'number' && parsed.version > 1) {
+      throw new Error(`${path.basename(filePath)} uses a newer schema version and cannot be overwritten.`);
+    }
+    if (!isObject(parsed)) throw new Error(`${path.basename(filePath)} has an invalid document shape.`);
+    existing = parsed;
+  }
+  return { ...existing, ...clone(patch), version: 1 };
 }
 
 async function readCollection(directory, defaults, warnings) {
@@ -253,22 +281,26 @@ async function saveResource(key, value) {
   }
   if (key === 'projects') {
     assertValidResource(key, value);
-    await writeAtomic(path.join(root, resourceFiles.projects), { version: 1, projects: clone(value) });
+    const filePath = path.join(root, resourceFiles.projects);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { projects: clone(value) }));
     return;
   }
   if (key === 'profiles') {
     assertValidResource(key, value);
-    await writeAtomic(path.join(root, resourceFiles.profiles), { version: 1, profiles: clone(value) });
+    const filePath = path.join(root, resourceFiles.profiles);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { profiles: clone(value) }));
     return;
   }
   if (key === 'providerSettings') {
     assertValidResource(key, value);
-    await writeAtomic(path.join(root, resourceFiles.providerSettings), { version: 1, providers: clone(value) });
+    const filePath = path.join(root, resourceFiles.providerSettings);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { providers: clone(value) }));
     return;
   }
   if (key === 'providerInstructions') {
     assertValidResource(key, value);
-    await writeAtomic(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: clone(value) });
+    const filePath = path.join(root, resourceFiles.providerInstructions);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { instructions: clone(value) }));
     return;
   }
   if (!['goals', 'roles', 'guardrails'].includes(key)) throw new Error(`Unsupported resource: ${key}`);

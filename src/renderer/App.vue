@@ -11,7 +11,7 @@ import ProjectsPage from './pages/ProjectsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { initializeStore, persist, selectedProject, store } from './services/store';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const error = ref<string | null>(null);
 const appSnapshot = computed(() => store.snapshot as AppSnapshot);
 const project = computed(selectedProject);
@@ -28,6 +28,10 @@ const navigation = computed(() => [
 async function load() {
   try {
     await initializeStore();
+    if (store.snapshot) {
+      locale.value = store.snapshot.config.locale;
+      document.documentElement.lang = locale.value;
+    }
   } catch (loadError) {
     error.value = loadError instanceof Error ? loadError.message : String(loadError);
   }

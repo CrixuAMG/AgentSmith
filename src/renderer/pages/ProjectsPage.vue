@@ -81,6 +81,11 @@ async function addProject() {
 async function chooseProject(projectId: string) {
   const candidate = projects.value.find((item) => item.id === projectId);
   if (!candidate) return;
+  const validation = await api.validateProject(candidate);
+  if (!validation.valid) {
+    localError.value = validation.error ?? t('projects.invalidProject');
+    return;
+  }
   candidate.lastOpenedAt = new Date().toISOString();
   await selectProject(projectId);
   await persist('projects', projects.value);
@@ -113,6 +118,17 @@ async function selectFile(node: ProjectFileNode) {
 async function selectSearchResult(node: ProjectFileNode) {
   if (node.kind === 'directory') return;
   await selectFile(node);
+}
+
+async function togglePromptFile() {
+  if (!project.value || !store.selectedFile) return;
+  const path = store.selectedFile.relativePath;
+  const existingIndex = store.promptFiles.findIndex((file) => file.path === path);
+  if (existingIndex >= 0) {
+    store.promptFiles.splice(existingIndex, 1);
+    return;
+  }
+  store.promptFiles.push({ path, content: store.selectedFile.content });
 }
 
 async function selectChange(change: NonNullable<typeof store.git>['changes'][number]) {
@@ -237,7 +253,7 @@ onMounted(() => { if (project.value && store.treeLoadedFor !== project.value.id)
               <div v-else class="file-tree" role="tree"><FileTreeNode v-for="node in store.tree" :key="node.relativePath" :node="node" :selected-path="store.selectedFilePath" @select="selectFile" /></div>
               <div class="tree-footer mono">{{ t('workspace.readOnly') }} · {{ t('workspace.gitignoreAware') }}</div>
             </div>
-            <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" />
+             <FileViewer :file="store.selectedFile" :loading="store.fileLoading" :error="store.error" :context-selected="store.selectedFilePath ? store.promptFiles.some((file) => file.path === store.selectedFilePath) : false" @toggle-context="togglePromptFile" />
           </div>
 
           <div v-else-if="store.workspaceTab === 'git'" class="git-layout">

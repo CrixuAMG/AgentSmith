@@ -121,6 +121,8 @@
 .viewer-header > div { display: grid; gap: 5px; min-width: 0; }
 .viewer-header strong { overflow: hidden; color: var(--text); font: 12px 'DM Mono', monospace; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-header .mono { color: var(--text-faint); }
+.viewer-header .viewer-actions { display: flex; align-items: center; gap: 8px; }
+.viewer-actions .secondary-button { min-height: 29px; padding: 0 8px; font-size: 10px; }
 .viewer-readonly { flex: 0 0 auto; padding: 4px 6px; border: 1px solid var(--line-strong); color: var(--text-faint); font: 9px 'DM Mono', monospace; }
 .viewer-message { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; height: 100%; min-height: 300px; padding: 30px; color: var(--text-soft); font-size: 12px; }
 .viewer-message strong { color: var(--text); }
@@ -403,6 +405,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .security-lines span { display: flex; align-items: center; gap: 9px; color: var(--text-soft); font-size: 11px; }
 .security-lines b { color: var(--green); font: 10px 'DM Mono', monospace; }
 .global-instructions-card { grid-column: span 2; min-height: 300px; }
+.provider-instructions-card { grid-column: span 2; min-height: 340px; }
+.provider-instruction-editor { display: grid; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .global-instructions-card .settings-card-heading { align-items: start; }
 .global-instructions-card .settings-card-heading > div { display: grid; gap: 8px; }
 .global-instructions-card .settings-card-heading p { max-width: 580px; margin: 0; }
@@ -424,6 +428,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .prompt-main-grid { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 10px; margin-top: 10px; }
 .prompt-controls { display: grid; align-content: start; gap: 10px; }
 .prompt-section-card { padding: 16px; }
+.prompt-context-extra { margin-top: 10px; }
 .prompt-section-card .form-field { margin-top: 16px; margin-bottom: 0; }
 .prompt-section-card .prompt-card-heading p { max-width: 190px; margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.5; }
 .goal-check-list { display: grid; gap: 2px; margin-top: 15px; }
@@ -484,7 +489,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 900px) {
   .provider-grid, .settings-cards { grid-template-columns: 1fr; }
-  .security-card, .global-instructions-card { grid-column: auto; }
+  .security-card, .global-instructions-card, .provider-instructions-card { grid-column: auto; }
   .security-lines { grid-template-columns: 1fr; gap: 8px; }
   .prompt-main-grid { grid-template-columns: 1fr; }
 }

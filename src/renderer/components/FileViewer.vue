@@ -4,7 +4,8 @@ import hljs from 'highlight.js/lib/common';
 
 import type { FileReadResult } from '@/shared/types';
 
-const props = defineProps<{ file: FileReadResult | null; loading?: boolean; error?: string | null }>();
+const props = defineProps<{ file: FileReadResult | null; loading?: boolean; error?: string | null; contextSelected?: boolean }>();
+const emit = defineEmits<{ toggleContext: [] }>();
 
 const highlighted = computed(() => {
   if (!props.file) return '';
@@ -29,7 +30,7 @@ function escapeHtml(value: string) {
     <div v-else-if="error" class="viewer-message viewer-error"><span class="empty-mark">!</span>{{ error }}</div>
     <div v-else-if="!file" class="viewer-message"><span class="empty-mark">{ }</span><strong>{{ $t('workspace.selectFile') }}</strong><span>{{ $t('workspace.selectFileDetail') }}</span></div>
     <template v-else>
-      <div class="viewer-header"><div><strong>{{ file.relativePath }}</strong><span class="mono">{{ file.language }} · {{ file.lineCount }} {{ $t('workspace.lines').toLowerCase() }}</span></div><span class="viewer-readonly">{{ $t('workspace.readOnly') }}</span></div>
+       <div class="viewer-header"><div><strong>{{ file.relativePath }}</strong><span class="mono">{{ file.language }} · {{ file.lineCount }} {{ $t('workspace.lines').toLowerCase() }}</span></div><div class="viewer-actions"><button class="secondary-button" type="button" :title="$t(contextSelected ? 'workspace.removeFromPrompt' : 'workspace.addToPrompt')" @click="emit('toggleContext')">{{ contextSelected ? '−' : '+' }} {{ contextSelected ? $t('workspace.removeFromPrompt') : $t('workspace.addToPrompt') }}</button><span class="viewer-readonly">{{ $t('workspace.readOnly') }}</span></div></div>
       <div class="code-scroll">
         <div class="line-numbers" aria-hidden="true"><span v-for="line in lines" :key="line">{{ line }}</span></div>
         <pre class="code-content"><code v-html="highlighted"></code></pre>

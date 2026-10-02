@@ -3,6 +3,7 @@ import type {
   AppConfig,
   Goal,
   GuardrailProfile,
+  ProviderSetting,
   Project,
   Role,
 } from './types';
@@ -86,6 +87,18 @@ export function isAgentProfile(value: unknown): value is AgentProfile {
     && (value.guardrailProfileId === null || isString(value.guardrailProfileId));
 }
 
+export function isProviderSetting(value: unknown): value is ProviderSetting {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.name)
+    && (value.executable === null || isString(value.executable))
+    && isBoolean(value.enabled);
+}
+
+export function isProviderInstructions(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every(isString);
+}
+
 export function validateCollection<T>(value: unknown, predicate: (item: unknown) => item is T): T[] {
   if (!Array.isArray(value)) {
     throw new Error('Expected a collection.');
@@ -112,6 +125,9 @@ export function validateResource(key: string, value: unknown): unknown {
     case 'profiles':
       return validateCollection(value, isAgentProfile);
     case 'providerSettings':
+      return validateCollection(value, isProviderSetting);
+    case 'providerInstructions':
+      if (!isProviderInstructions(value)) throw new Error('Invalid provider instructions.');
       return value;
     case 'globalInstructions':
       if (!isString(value)) throw new Error('Global instructions must be text.');

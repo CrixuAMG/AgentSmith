@@ -21,6 +21,7 @@ export const store = reactive({
   treeLoadedFor: null as string | null,
   selectedFilePath: null as string | null,
   selectedFile: null as FileReadResult | null,
+  promptFiles: [] as Array<{ path: string; content: string }>,
   fileLoading: false,
   git: null as GitStatus | null,
   gitLoading: false,
@@ -72,6 +73,7 @@ export function clearWorkspace() {
   store.treeLoadedFor = null;
   store.selectedFilePath = null;
   store.selectedFile = null;
+  store.promptFiles = [];
   store.git = null;
   store.gitDiff = null;
   store.instructions = [];

@@ -6,6 +6,8 @@ const ignore = require('ignore');
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_TREE_NODES = 6000;
 const MAX_TREE_DEPTH = 14;
+const MAX_INSTRUCTION_FILES = 500;
+const MAX_INSTRUCTION_DEPTH = 14;
 const globalInstructionToken = '@global/AGENTS.md';
 
 const isWithin = (root, candidate) => candidate === root || candidate.startsWith(`${root}${path.sep}`);
@@ -32,6 +34,13 @@ async function safePath(project, relativePath, options = {}) {
   const normalized = normalizeRelative(relativePath);
   const candidate = path.resolve(root, normalized);
   if (!isWithin(root, candidate)) throw new Error('The requested path leaves the project root.');
+  if (options.rejectSymlink) {
+    try {
+      if ((await fs.lstat(candidate)).isSymbolicLink()) throw new Error('The instruction target is an existing symlink. Review it explicitly before replacing it.');
+    } catch (error) {
+      if (!(error instanceof Error && error.code === 'ENOENT')) throw error;
+    }
+  }
   if (options.mustExist === false) {
     try {
       const existingTarget = await fs.realpath(candidate);
@@ -99,6 +108,12 @@ function guardrailMatches(pattern, relativePath) {
 
 function readAllowed(relativePath, profile) {
   const rules = profile?.rules || [];
+  const baseline = [
+    { id: 'baseline-env', pattern: '**/.env*', description: 'Environment files are never shown by the application.' },
+    { id: 'baseline-private-key', pattern: '**/*.{pem,key,p12}', description: 'Private key files are never shown by the application.' },
+  ];
+  const baselineMatch = baseline.find((rule) => guardrailMatches(rule.pattern, relativePath));
+  if (baselineMatch) return { allowed: false, reason: baselineMatch.description };
   const matched = rules.find((rule) => rule.enabled && rule.type === 'file_access' && guardrailMatches(rule.pattern, relativePath));
   if (matched?.action === 'deny') {
     return { allowed: false, reason: matched.description || `Blocked by guardrail ${matched.id}.` };
@@ -178,6 +193,8 @@ async function readFile(project, relativePath, guardrails) {
   const buffer = await fs.readFile(target.candidate);
   if (buffer.includes(0)) throw new Error('Binary files are not shown in the viewer.');
   const content = buffer.toString('utf8');
+  const replacementCount = (content.match(/\uFFFD/g) || []).length;
+  if (replacementCount > 0 && replacementCount / Math.max(content.length, 1) > 0.01) throw new Error('Binary files are not shown in the viewer.');
   return { relativePath: normalized, content, language: languageFor(normalized), lineCount: content ? content.split('\n').length : 1, size: stat.size };
 }
 
@@ -191,6 +208,11 @@ async function validateProject(project) {
 }
 
 async function atomicTextWrite(filePath, content, overwrite) {
+  try {
+    if ((await fs.lstat(filePath)).isSymbolicLink()) throw new Error('The instruction target is an existing symlink. Review it explicitly before replacing it.');
+  } catch (error) {
+    if (!(error instanceof Error && error.code === 'ENOENT')) throw error;
+  }
   let existing = false;
   try {
     await fs.access(filePath);
@@ -208,7 +230,9 @@ async function atomicTextWrite(filePath, content, overwrite) {
 async function listInstructions(project, globalPath) {
   const root = await canonicalRoot(project);
   const found = [{ relativePath: globalInstructionToken, absolutePath: globalPath, scope: 'global', depth: 0, readable: true }];
+  let instructionCount = 0;
   async function walk(directory, relativeDirectory, depth) {
+    if (depth > MAX_INSTRUCTION_DEPTH || instructionCount >= MAX_INSTRUCTION_FILES) return;
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.name === '.git' || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
@@ -217,6 +241,7 @@ async function listInstructions(project, globalPath) {
       if (entry.isDirectory()) {
         await walk(path.join(directory, entry.name), relativePath, depth + 1);
       } else if (entry.isFile() && entry.name === 'AGENTS.md') {
+        instructionCount += 1;
         found.push({
           relativePath,
           absolutePath: path.join(directory, entry.name),
@@ -245,7 +270,7 @@ async function writeInstruction(project, relativePath, content, overwrite, globa
     return;
   }
   if (!relativePath.endsWith('/AGENTS.md') && relativePath !== 'AGENTS.md') throw new Error('Instruction files must be named AGENTS.md.');
-  const target = await safePath(project, relativePath, { mustExist: false });
+  const target = await safePath(project, relativePath, { mustExist: false, rejectSymlink: true });
   await fs.mkdir(path.dirname(target.candidate), { recursive: true });
   await atomicTextWrite(target.candidate, content, overwrite);
 }

@@ -190,11 +190,15 @@ export interface PromptSection {
 
 export interface PromptContextOptions {
   globalInstructions: boolean;
+  providerInstructions: boolean;
   projectInstructions: boolean;
   nestedInstructions: boolean;
   gitStatus: boolean;
   gitDiff: boolean;
   projectStructure: boolean;
+  readme: boolean;
+  composerJson: boolean;
+  packageJson: boolean;
   selectedFiles: boolean;
 }
 
@@ -205,9 +209,13 @@ export interface PromptCompositionInput {
   goals: Goal[];
   guardrails: GuardrailProfile | null;
   globalInstructions: string;
+  providerInstructions: string;
   projectInstructions: string;
   nestedInstructions: string;
   projectStructure: string;
+  readme: string;
+  composerJson: string;
+  packageJson: string;
   gitStatus: string;
   gitDiff: string;
   selectedFiles: Array<{ path: string; content: string }>;

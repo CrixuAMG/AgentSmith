@@ -19,6 +19,7 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
       'You are working as a careful software engineering agent. Inspect existing context before changing anything. Keep changes focused, explain assumptions, and report verification honestly.',
     ),
     section('global-instructions', 'Global instructions', input.globalInstructions, input.contexts.globalInstructions && Boolean(clean(input.globalInstructions))),
+    section('provider-instructions', 'Provider instructions', input.providerInstructions, input.contexts.providerInstructions && Boolean(clean(input.providerInstructions))),
     section('project-instructions', 'Project instructions', input.projectInstructions, input.contexts.projectInstructions && Boolean(clean(input.projectInstructions))),
     section('nested-instructions', 'Nested instructions', input.nestedInstructions, input.contexts.nestedInstructions && Boolean(clean(input.nestedInstructions))),
     section(
@@ -46,6 +47,9 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
       Boolean(input.project),
     ),
     section('project-structure', 'Project structure', input.projectStructure, input.contexts.projectStructure && Boolean(clean(input.projectStructure))),
+    section('readme', 'README.md', input.readme, input.contexts.readme && Boolean(clean(input.readme))),
+    section('composer-json', 'composer.json', input.composerJson, input.contexts.composerJson && Boolean(clean(input.composerJson))),
+    section('package-json', 'package.json', input.packageJson, input.contexts.packageJson && Boolean(clean(input.packageJson))),
     section('git-status', 'Git status', input.gitStatus, input.contexts.gitStatus && Boolean(clean(input.gitStatus))),
     section('git-diff', 'Git diff', input.gitDiff, input.contexts.gitDiff && Boolean(clean(input.gitDiff))),
   ];

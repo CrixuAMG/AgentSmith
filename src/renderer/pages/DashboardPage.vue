@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
-import { selectProject, selectedProject, store } from '../services/store';
+import { persist, selectProject, selectedProject, store } from '../services/store';
 
 const emit = defineEmits<{ navigate: [view: 'projects' | 'prompt-studio'] }>();
 const { t } = useI18n();
@@ -16,6 +16,11 @@ const activeGuardrail = computed(() => {
 const recentProjects = computed(() => [...(store.snapshot?.projects ?? [])].sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt)).slice(0, 4));
 
 async function openProject(projectId: string) {
+  const candidate = store.snapshot?.projects.find((item) => item.id === projectId);
+  if (candidate) {
+    candidate.lastOpenedAt = new Date().toISOString();
+    await persist('projects', store.snapshot!.projects);
+  }
   await selectProject(projectId);
   emit('navigate', 'projects');
 }
