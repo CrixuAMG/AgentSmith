@@ -24,6 +24,11 @@ async function openProject(projectId: string) {
   await selectProject(projectId);
   emit('navigate', 'projects');
 }
+
+function addProject() {
+  store.pendingProjectPicker = true;
+  emit('navigate', 'projects');
+}
 </script>
 
 <template>
@@ -51,7 +56,7 @@ async function openProject(projectId: string) {
         <div v-else class="empty-card-copy">
           <h2>{{ t('dashboard.noProjects') }}</h2>
           <p>{{ t('dashboard.readyDetail') }}</p>
-          <button class="text-button" type="button" @click="emit('navigate', 'projects')">{{ t('dashboard.addFirst') }} <span>→</span></button>
+          <button class="text-button" type="button" @click="addProject">{{ t('dashboard.addFirst') }} <span>→</span></button>
         </div>
       </article>
       <article class="dashboard-panel profile-panel">

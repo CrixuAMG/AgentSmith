@@ -48,6 +48,11 @@ function selectView(view: ViewId) {
   store.activeView = view;
 }
 
+function openProjectPicker() {
+  store.pendingProjectPicker = true;
+  selectView('projects');
+}
+
 onMounted(load);
 </script>
 
@@ -68,7 +73,7 @@ onMounted(load);
         <span class="eyebrow">{{ t('shell.project') }}</span>
         <strong>{{ project?.name ?? t('shell.noProject') }}</strong>
         <span v-if="project" class="mono truncate">{{ project.path }}</span>
-        <button class="quiet-button" type="button" @click="selectView('projects')"><span aria-hidden="true">+</span> {{ t('shell.openProject') }}</button>
+        <button class="quiet-button" type="button" @click="openProjectPicker"><span aria-hidden="true">+</span> {{ t('shell.openProject') }}</button>
       </div>
 
       <nav class="primary-nav" :aria-label="t('nav.workspace')">

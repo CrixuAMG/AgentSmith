@@ -22,6 +22,7 @@ describe('application shell', () => {
     memoryStorage.clear();
     store.snapshot = null;
     store.activeView = 'dashboard';
+    store.pendingProjectPicker = false;
   });
 
   it('loads the dashboard and switches to the project workspace', async () => {
@@ -30,5 +31,16 @@ describe('application shell', () => {
     expect(wrapper.text()).toContain('Your development command center.');
     await wrapper.findAll('button.nav-item')[1].trigger('click');
     expect(wrapper.text()).toContain('Inspect the codebase before you change it.');
+  });
+
+  it('opens the project picker flow from the empty dashboard action', async () => {
+    const wrapper = mount(App, { global: { plugins: [i18n] } });
+    await flushPromises();
+    await wrapper.findAll('button.nav-item')[1].trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Inspect the codebase before you change it.');
+    await wrapper.findAll('button.primary-button').find((button) => button.text().includes('Add project'))?.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Project selection is unavailable');
   });
 });

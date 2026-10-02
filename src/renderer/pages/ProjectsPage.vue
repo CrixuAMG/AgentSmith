@@ -64,18 +64,26 @@ async function loadWorkspace() {
 
 async function addProject() {
   localError.value = null;
-  const picked = await api.pickProject();
-  if (!picked || !store.snapshot) return;
-  const candidate: Project = { id: crypto.randomUUID(), name: picked.name, path: picked.path, lastOpenedAt: new Date().toISOString() };
-  const validation = await api.validateProject(candidate);
-  if (!validation.valid) {
-    localError.value = validation.error ?? t('projects.invalidProject');
-    return;
+  try {
+    const picked = await api.pickProject();
+    if (!picked) {
+      localError.value = t('projects.pickerUnavailable');
+      return;
+    }
+    if (!store.snapshot) return;
+    const candidate: Project = { id: crypto.randomUUID(), name: picked.name, path: picked.path, lastOpenedAt: new Date().toISOString() };
+    const validation = await api.validateProject(candidate);
+    if (!validation.valid) {
+      localError.value = validation.error ?? t('projects.invalidProject');
+      return;
+    }
+    store.snapshot.projects.unshift(candidate);
+    await persist('projects', store.snapshot.projects);
+    await selectProject(candidate.id);
+    await loadWorkspace();
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
   }
-  store.snapshot.projects.unshift(candidate);
-  await persist('projects', store.snapshot.projects);
-  await selectProject(candidate.id);
-  await loadWorkspace();
 }
 
 async function chooseProject(projectId: string) {
@@ -204,7 +212,14 @@ function handleSearchKeydown(event: KeyboardEvent) {
 
 watch(search, () => { searchCursor.value = 0; });
 watch(project, () => { void loadWorkspace(); });
-onMounted(() => { if (project.value && store.treeLoadedFor !== project.value.id) void loadWorkspace(); });
+onMounted(() => {
+  if (store.pendingProjectPicker) {
+    store.pendingProjectPicker = false;
+    void addProject();
+    return;
+  }
+  if (project.value && store.treeLoadedFor !== project.value.id) void loadWorkspace();
+});
 </script>
 
 <template>
@@ -230,9 +245,10 @@ onMounted(() => { if (project.value && store.treeLoadedFor !== project.value.id)
       </aside>
 
       <section class="workspace-content">
+        <div v-if="localError" class="inline-error" role="alert">{{ localError }}</div>
         <div v-if="!project" class="workspace-empty empty-state"><span class="empty-mark">⌘</span><strong>{{ t('projects.noSelection') }}</strong><span>{{ t('projects.noSelectionDetail') }}</span><button class="primary-button" type="button" @click="addProject">{{ t('projects.add') }}</button></div>
         <template v-else>
-          <div v-if="localError || store.error" class="inline-error" role="alert">{{ localError || store.error }}</div>
+          <div v-if="store.error" class="inline-error" role="alert">{{ store.error }}</div>
           <div class="workspace-toolbar">
             <div class="workspace-tabs" role="tablist">
               <button class="workspace-tab" :class="{ active: store.workspaceTab === 'explorer' }" type="button" @click="store.workspaceTab = 'explorer'">{{ t('workspace.explorer') }}</button>

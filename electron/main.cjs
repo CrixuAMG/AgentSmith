@@ -35,7 +35,10 @@ app.whenReady().then(() => {
   ipcMain.handle('storage:load', () => loadSnapshot());
   ipcMain.handle('storage:save', (_event, key, value) => saveResource(key, value));
   ipcMain.handle('projects:pick', async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select a project directory',
+      properties: ['openDirectory', 'createDirectory'],
+    });
     if (result.canceled || result.filePaths.length === 0) return null;
     const selectedPath = result.filePaths[0];
     return { path: selectedPath, name: path.basename(selectedPath) };

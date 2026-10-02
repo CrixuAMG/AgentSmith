@@ -15,6 +15,7 @@ import { api } from './api';
 export const store = reactive({
   snapshot: null as AppSnapshot | null,
   activeView: 'dashboard' as ViewId,
+  pendingProjectPicker: false,
   workspaceTab: 'explorer' as WorkspaceTab,
   tree: [] as ProjectFileNode[],
   treeLoading: false,

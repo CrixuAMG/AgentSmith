@@ -96,6 +96,7 @@ const messages = {
       remove: 'Remove from registry',
       removeConfirm: 'Remove this project from AgentSmith? Its files will not be deleted.',
       invalidProject: 'That directory is not available.',
+      pickerUnavailable: 'Project selection is unavailable. Use the desktop application and ensure its native picker is accessible.',
     },
     workspace: {
       explorer: 'Explorer',
