@@ -4,10 +4,13 @@ const path = require('node:path');
 const MAX_SUGGESTION_BYTES = 256 * 1024;
 const MAX_FOLDER_NAME_LENGTH = 80;
 const MAX_NAME_ATTEMPTS = 20;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 const isWithin = (root, candidate) => candidate === root || candidate.startsWith(`${root}${path.sep}`);
 const timestamp = () => new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
+const hasControlCharacter = (value) => [...value].some((character) => {
+  const codePoint = character.codePointAt(0);
+  return codePoint < 32 || codePoint === 127;
+});
 
 /**
  * The renderer supplies the project display name, which is untrusted input. It is
@@ -20,7 +23,7 @@ function suggestionFolderName(value) {
   if (!name || name.length > MAX_FOLDER_NAME_LENGTH) throw new Error('The project name is not usable as a suggestion folder.');
   if (name === '.' || name === '..') throw new Error('The project name is not usable as a suggestion folder.');
   if (/[/\\]/.test(name)) throw new Error('The project name must not contain path separators.');
-  if (CONTROL_CHARACTERS.test(name)) throw new Error('The project name must not contain control characters.');
+  if (hasControlCharacter(name)) throw new Error('The project name must not contain control characters.');
   return name;
 }
 
@@ -52,11 +55,10 @@ async function resolveSuggestionDirectory(root, folder) {
 async function writeSuggestionFile(directory, fileNameBase, content) {
   for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
     const fileName = attempt === 0 ? `${fileNameBase}.md` : `${fileNameBase}-${attempt + 1}.md`;
-    const absolutePath = path.join(directory, fileName);
     try {
       // 'wx' fails instead of truncating, so an existing suggestion is never lost.
-      await fs.writeFile(absolutePath, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      return { fileName, absolutePath };
+      await fs.writeFile(path.join(directory, fileName), content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      return fileName;
     } catch (error) {
       if (!(error instanceof Error && error.code === 'EEXIST')) throw error;
     }
@@ -68,7 +70,7 @@ async function saveSuggestion(root, project, content) {
   const folder = suggestionFolderName(project?.name);
   assertSuggestionContent(content);
   const { resolvedDirectory, logicalDirectory } = await resolveSuggestionDirectory(root, folder);
-  const { fileName } = await writeSuggestionFile(resolvedDirectory, timestamp(), content);
+  const fileName = await writeSuggestionFile(resolvedDirectory, timestamp(), content);
   return {
     relativePath: path.join('suggestions', folder, fileName),
     absolutePath: path.join(logicalDirectory, fileName),

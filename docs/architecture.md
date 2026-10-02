@@ -14,6 +14,7 @@ Electron main process
 ├── ProjectService           path validation, tree scanning, guarded reads
 ├── GitService               machine-readable status and read-only diffs
 ├── InstructionService       AGENTS.md discovery and guarded atomic writes
+├── SuggestionService        validated suggestion markdown persistence
 ├── ProviderRegistry         OpenCode and Codex adapters
 ├── ProcessService           allowlisted provider process execution
 └── IPC handlers             typed, minimal renderer-facing operations
@@ -34,11 +35,11 @@ Vue renderer
 
 ### Core/domain
 
-The shared TypeScript types describe projects, instructions, roles, goals, guardrails, providers, prompts, and execution states. `PromptComposer` is deterministic and has no Electron dependency. Guardrail matching is a pure function so it can be tested without a desktop runtime.
+The shared TypeScript types describe projects, instructions, roles, goals, guardrails, providers, prompts, suggestions, and execution states. `PromptComposer` is deterministic and has no Electron dependency, and `composeSuggestionPrompt` follows the same rule so suggestion text can be produced in a pure unit test. Guardrail matching is a pure function so it can be tested without a desktop runtime.
 
 ### Infrastructure
 
-The main process owns all operating-system integrations. Configuration storage accepts only known resource keys, validates versioned documents, writes a backup before replacement, and uses a temporary file plus rename for atomicity. Project reads resolve paths relative to a registered project root and reject traversal and symlink escapes. Git is invoked with argument arrays and machine-readable flags. Provider commands are allowlisted by provider adapter.
+The main process owns all operating-system integrations. Configuration storage accepts only known resource keys, validates versioned documents, writes a backup before replacement, and uses a temporary file plus rename for atomicity. Project reads resolve paths relative to a registered project root and reject traversal and symlink escapes. Git is invoked with argument arrays and machine-readable flags. Provider commands are allowlisted by provider adapter. Suggestion writes derive their directory from a validated project name, resolve the real path to confirm containment, and create each file exclusively so an existing suggestion is never truncated.
 
 ### Presentation
 
@@ -54,9 +55,10 @@ The preload bridge exposes only these operation families:
 * `git.status` and `git.diff` for read-only repository inspection.
 * `instructions.list`, `instructions.read`, and `instructions.write`.
 * `providers.discover`.
+* `suggestions.save` for a project-scoped suggestion markdown file.
 * `process.start`, `process.cancel`, and process event subscriptions.
 
-No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array.
+No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array. No IPC method accepts a writable path: `suggestions.save` receives the project and the body only, and the main process derives the storage location.
 
 ## Provider Contract
 
@@ -79,13 +81,19 @@ The initial OpenCode adapter runs the installed `models --verbose` command and f
 
 `PromptComposer` creates ordered sections: operating contract, global instructions, provider instructions, project instructions, role, goals, guardrails, project structure, README/package manifests, Git context, selected files, and user task. Each section is retained in the preview model, so the preview and the execution request share the same generated prompt. Context sources are opt-in except global/project instructions, project structure, and Git status defaults. Files added from the Explorer are read through the same guarded main-process API before entering the prompt.
 
+## Feature Suggestions
+
+Prompt Studio exposes **Make a suggestion** on the task editor. It does not call a provider. `composeSuggestionPrompt` deterministically derives a feature-proposal prompt from the selected project, the selected role, the enabled goals, and a rotating angle. The role's ID, name, and tags select a discipline, which selects the example feature directions offered to the agent, so a backend role is steered toward provider adapters or service boundaries while an interface role is steered toward themes, transitions, or layout persistence. Twelve angles cycle, and each rotation reports its round number.
+
+The generated prompt is displayed for review with **Another suggestion** and **Accept suggestion**. Nothing is executed automatically. Every generated prompt is persisted by the main process before it is shown, so an abandoned suggestion is still recoverable. Accepting copies the text into the task field, above any existing task text separated by a horizontal rule, and then follows the ordinary composed-prompt path: guardrails, context selection, section preview, explicit confirmation, and process execution. The suggestion is therefore task content, not a second prompt format.
+
 ## Navigation
 
 The shell has a persistent sidebar with Dashboard, Projects, Prompt Studio, Agent Profiles, Personalization, and Settings. Projects use workspace tabs for Explorer, Git Changes, and Instructions. The shell displays the selected project name and path in the top bar. Empty states are explicit when no project is selected or a provider is unavailable.
 
 ## Testing Strategy
 
-Pure domain tests cover path rules, guardrail matching, prompt composition, fuzzy search, and configuration validation. Infrastructure tests use temporary directories and a temporary Git repository. Provider tests mock executables rather than requiring credentials. Renderer tests are intentionally focused on exposed page behavior; the production build remains the final integration check.
+Pure domain tests cover path rules, guardrail matching, prompt composition, suggestion composition, fuzzy search, and configuration validation. Infrastructure tests use temporary directories and a temporary Git repository. Provider tests mock executables rather than requiring credentials. Renderer tests are intentionally focused on exposed page behavior; the production build remains the final integration check.
 
 ## Future Shell Replacement
 

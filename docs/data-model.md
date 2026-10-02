@@ -16,10 +16,21 @@ All documents carry a numeric `version`. Resource files are modular so a damaged
 ├── providers/instructions.json
 ├── instructions/global.md
 ├── prompts/templates.json
+├── suggestions/<project-name>/<timestamp>.md
 └── logs/
 ```
 
 On Windows the root is `%APPDATA%/AgentSmith`. The configured path is displayed in Settings.
+
+## `suggestions/`
+
+Every feature suggestion generated in Prompt Studio is written here, whether or not it was accepted. The directory is named after the project's display name and the file after the UTC generation time, so several suggestions per day never collide:
+
+```text
+suggestions/AgentSmith/2026-10-02T14-33-05-123Z.md
+```
+
+The name is derived, never supplied by the renderer. The project name is accepted only as a single directory segment (no separators, no `.`/`..`, no control characters, length bounded), the resolved directory must stay inside `suggestions/`, and files are created exclusively at mode `0o600`. Bodies are bounded at 256 KB of UTF-8 text. A rejected name leaves the directory tree untouched. Suggestions are append-only: no read, list, or delete operation is exposed, so a renderer cannot rewrite or remove an earlier record through this surface.
 
 ## `config.json`
 
@@ -97,6 +108,23 @@ The composer returns:
 ```
 
 The input supports independent toggles for global/provider/project/nested instructions, Git status/diff, project structure, `README.md`, `composer.json`, `package.json`, and Explorer-selected files. The rendered preview and execution request consume this same object. No second illustrative prompt format exists.
+
+## Suggestion Model
+
+A feature suggestion is task content, not a separate prompt format:
+
+```ts
+{
+  angleId: string;      // rotating lens, for example "capability" or "accessibility"
+  angleLabel: string;
+  discipline: 'backend' | 'frontend' | 'quality' | 'architecture' | 'security' | 'general';
+  round: number;        // 1-based; increments after every full rotation of the angles
+  title: string;
+  text: string;
+}
+```
+
+The composer is deterministic: the same project, role, goals, and rotation step always produce the same text. It reads only the project *name* — never the project path or file contents — so a suggestion file on disk records which project it concerns without spreading private paths. Once accepted, the text becomes the composed prompt's task section and is governed by the same guardrails and context toggles as any other task.
 
 ## Migration Strategy
 

@@ -1,5 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -14,8 +13,10 @@ const suggestionService = require('../../electron/suggestion-service.cjs') as {
 
 const temporaryDirectories: string[] = [];
 
+// macOS resolves temporary directories through a symlink, so tests compare against
+// the canonical root the way the service resolves it.
 async function suggestionsRoot() {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentsmith-suggestions-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'agentsmith-suggestions-')));
   temporaryDirectories.push(root);
   return root;
 }
@@ -32,7 +33,7 @@ describe('suggestion storage', () => {
     const saved = await suggestionService.saveSuggestion(root, project, '# New capability: AgentSmith\n\nPropose a feature.\n');
 
     expect(saved.relativePath).toMatch(/^suggestions[\\/]AgentSmith[\\/]\d{4}-\d{2}-\d{2}T[\d-]+Z\.md$/);
-    expect(saved.absolutePath.startsWith(path.join(root, 'suggestions', 'AgentSmith'))).toBe(true);
+    expect(saved.absolutePath.startsWith(path.join(root, 'AgentSmith'))).toBe(true);
     expect(await readFile(saved.absolutePath, 'utf8')).toContain('Propose a feature.');
     expect(Number.isNaN(Date.parse(saved.savedAt))).toBe(false);
 
@@ -46,7 +47,7 @@ describe('suggestion storage', () => {
     const second = await suggestionService.saveSuggestion(root, project, 'identical body');
 
     expect(second.absolutePath).not.toBe(first.absolutePath);
-    const files = await readdir(path.join(root, 'suggestions', 'AgentSmith'));
+    const files = await readdir(path.join(root, 'AgentSmith'));
     expect(files).toHaveLength(2);
     expect(await readFile(first.absolutePath, 'utf8')).toBe('identical body');
   });
@@ -74,7 +75,7 @@ describe('suggestion storage', () => {
     await expect(suggestionService.saveSuggestion(root, project, '   ')).rejects.toThrow('body is required');
     await expect(suggestionService.saveSuggestion(root, project, null as unknown as string)).rejects.toThrow('body is required');
     await expect(suggestionService.saveSuggestion(root, project, 'x'.repeat(suggestionService.MAX_SUGGESTION_BYTES + 1))).rejects.toThrow('256 KB storage limit');
-    expect(await readdir(path.join(root, 'suggestions'))).toEqual([]);
+    expect(await readdir(root)).toEqual([]);
   });
 
   it('creates the suggestions root when it does not exist yet', async () => {
@@ -82,6 +83,7 @@ describe('suggestion storage', () => {
     const root = path.join(parent, 'nested', 'suggestions');
     const saved = await suggestionService.saveSuggestion(root, project, 'body');
     await writeFile(path.join(parent, 'marker.txt'), 'kept', 'utf8');
+    expect(saved.absolutePath.startsWith(root)).toBe(true);
     expect(await readFile(saved.absolutePath, 'utf8')).toBe('body');
     expect(await readFile(path.join(parent, 'marker.txt'), 'utf8')).toBe('kept');
   });

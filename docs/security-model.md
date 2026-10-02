@@ -14,6 +14,17 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * `.env*` and common private-key extensions are denied by an application baseline before reads, in addition to active user guardrails. A denied file is never loaded into the renderer or prompt.
 * Project writes are limited to `AGENTS.md` paths and use an atomic temporary-file replacement. The application never writes arbitrary project files.
 
+## Suggestion Rules
+
+* The renderer supplies a project display name and a text body. It never supplies a path.
+* The display name is untrusted. It is rejected unless it can be used as one directory segment inside `suggestions/`: no path separators, no `.` or `..`, no control characters, and a bounded length.
+* After the directory is created, its real path is resolved and must still be inside the suggestions root, so a pre-planted symlink cannot redirect the write. The operation fails closed.
+* Files are created with an exclusive flag at mode `0o600`; an existing suggestion is never truncated or replaced, and a name collision allocates the next free suffix instead of overwriting.
+* Bodies must be UTF-8 text within 256 KB. A rejected body leaves the tree untouched.
+* The suggestion composer embeds the project name, role, and goal labels only. It never copies file contents, and it never embeds the absolute project path.
+* A suggestion is not executed. It becomes executable only after the user accepts it into the task field and completes the existing preflight confirmation, so guardrails and provider confirmation still apply.
+* There is no read, list, or delete operation for suggestions. The surface is write-only and append-only.
+
 ## Configuration Rules
 
 * Configuration is local JSON under the platform configuration root.
@@ -28,7 +39,7 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * Provider adapters return an executable and argument array. `spawn` runs with `shell: false` and a validated project working directory.
 * The initial process allowlist is `opencode` and `codex`, resolved by the main process. No arbitrary executable path is accepted from the UI.
 * The safe default does not pass OpenCode's `--auto` option. The UI warns that provider permissions are still provider-controlled.
-* Output is streamed to the current session but not persisted by default. Diagnostics redact obvious token/key patterns and never log file contents.
+* Output is streamed to the current session but not persisted by default. Diagnostics redact obvious token/key patterns and never log file contents. A generated feature suggestion is an exception: it is written to the local suggestions directory by design, never transmitted by AgentSmith itself, and never sent to a provider unless the user accepts it and confirms execution.
 * Cancellation sends `SIGTERM`, then escalates only after a short grace period.
 
 ## Guardrail Layers
