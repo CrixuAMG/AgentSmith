@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // Electron loads the production renderer through file://, so asset URLs must stay relative to dist/.
+  base: './',
   plugins: [vue()],
   resolve: {
     alias: {
