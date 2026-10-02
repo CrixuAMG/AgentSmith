@@ -90,7 +90,7 @@ async function gitDiff(project, relativePath, staged) {
   const target = await safePath(project, relativePath, { mustExist: false });
   const tracked = await runGit(['ls-files', '--error-unmatch', '--', target.relativePath], target.root);
   if (tracked.code !== 0) {
-    const untracked = await runGit(['diff', '--no-index', '--unified=80', '/dev/null', target.candidate], target.root);
+    const untracked = await runGit(['diff', '--no-index', '--no-ext-diff', '--text', '--unified=80', '/dev/null', target.candidate], target.root);
     if (untracked.code !== 0 && untracked.code !== 1) throw new Error(untracked.stderr.trim() || 'Git diff failed.');
     return untracked.stdout || 'No diff available for this file.';
   }
