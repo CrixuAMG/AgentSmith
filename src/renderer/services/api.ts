@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES } from '@/shared/defaults';
+import { toRaw } from 'vue';
 import type {
   AgentExecutionRequest,
   AgentSmithApi,
@@ -93,7 +94,34 @@ function browserApi(): AgentSmithApi {
   };
 }
 
-export const api: AgentSmithApi = window.agentSmith ?? browserApi();
+export function toPlainIpcValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => toPlainIpcValue(item)) as T;
+  if (value && typeof value === 'object') {
+    const raw = toRaw(value as object) as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, toPlainIpcValue(item)])) as T;
+  }
+  return value;
+}
+
+function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
+  return {
+    ...bridge,
+    saveResource: (key, value) => bridge.saveResource(key, toPlainIpcValue(value)),
+    validateProject: (project) => bridge.validateProject(toPlainIpcValue(project)),
+    scanProject: (project, options) => bridge.scanProject(toPlainIpcValue(project), toPlainIpcValue(options)),
+    readFile: (project, relativePath, guardrails) => bridge.readFile(toPlainIpcValue(project), relativePath, toPlainIpcValue(guardrails)),
+    gitStatus: (project) => bridge.gitStatus(toPlainIpcValue(project)),
+    gitDiff: (project, relativePath, staged) => bridge.gitDiff(toPlainIpcValue(project), relativePath, staged),
+    listInstructions: (project) => bridge.listInstructions(toPlainIpcValue(project)),
+    readInstruction: (project, relativePath) => bridge.readInstruction(toPlainIpcValue(project), relativePath),
+    writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
+    startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
+  };
+}
+
+export const api: AgentSmithApi = typeof window !== 'undefined' && window.agentSmith
+  ? desktopApi(window.agentSmith)
+  : browserApi();
 
 export function onProcessEvent(callback: (event: ExecutionEvent) => void): () => void {
   return api.onProcessEvent(callback);
