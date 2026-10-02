@@ -4,6 +4,8 @@ const path = require('node:path');
 const { loadSnapshot, saveResource, root: storageRoot } = require('./config-store.cjs');
 const projectService = require('./project-service.cjs');
 const { gitStatus, gitDiff } = require('./git-service.cjs');
+const { discoverProviders } = require('./provider-service.cjs');
+const { startProcess, cancelProcess } = require('./process-service.cjs');
 
 let mainWindow;
 
@@ -46,6 +48,9 @@ app.whenReady().then(() => {
   ipcMain.handle('instructions:list', (_event, project) => projectService.listInstructions(project, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('instructions:read', (_event, project, relativePath) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
+  ipcMain.handle('providers:discover', () => discoverProviders());
+  ipcMain.handle('process:start', (_event, request) => startProcess(request, (payload) => mainWindow?.webContents.send('process:event', payload)));
+  ipcMain.handle('process:cancel', (_event, executionId) => cancelProcess(executionId));
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

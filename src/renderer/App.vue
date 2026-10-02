@@ -4,7 +4,11 @@ import { useI18n } from 'vue-i18n';
 
 import type { AppSnapshot, ViewId } from '@/shared/types';
 import DashboardPage from './pages/DashboardPage.vue';
+import AgentProfilesPage from './pages/AgentProfilesPage.vue';
+import PersonalizationPage from './pages/PersonalizationPage.vue';
+import PromptStudioPage from './pages/PromptStudioPage.vue';
 import ProjectsPage from './pages/ProjectsPage.vue';
+import SettingsPage from './pages/SettingsPage.vue';
 import { initializeStore, persist, selectedProject, store } from './services/store';
 
 const { t } = useI18n();
@@ -85,6 +89,10 @@ onMounted(load);
       <section class="page-frame">
         <DashboardPage v-if="store.activeView === 'dashboard'" @navigate="selectView" />
         <ProjectsPage v-else-if="store.activeView === 'projects'" />
+        <PromptStudioPage v-else-if="store.activeView === 'prompt-studio'" />
+        <AgentProfilesPage v-else-if="store.activeView === 'agent-profiles'" />
+        <PersonalizationPage v-else-if="store.activeView === 'personalization'" />
+        <SettingsPage v-else-if="store.activeView === 'settings'" />
         <div v-else class="foundation-page"><span class="eyebrow">{{ navigation.find((item) => item.id === store.activeView)?.label }}</span><h1>{{ t('foundation.unavailableTitle') }}</h1><p class="lead">{{ t('foundation.unavailableDetail') }}</p><button class="primary-button" type="button" @click="selectView('dashboard')">{{ t('common.back') }}</button></div>
       </section>
     </main>
