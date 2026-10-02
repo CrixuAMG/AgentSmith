@@ -8,6 +8,10 @@ const activeProcesses = new Map();
 const cancellationTimers = new Map();
 const cancellationGracePeriod = 2000;
 
+function closeProcessInput(child) {
+  child.stdin?.end();
+}
+
 function evaluateExecutionGuardrails(request) {
   if (typeof request.prompt !== 'string' || !request.prompt.trim()) throw new Error('An execution prompt is required.');
   const denied = (request.guardrailProfile?.rules || []).find((rule) => rule.enabled
@@ -29,6 +33,9 @@ async function startProcess(request, emit) {
     windowsHide: true,
     env: process.env,
   });
+  // The prompt is passed as an argument. Close the unused pipe so one-shot
+  // provider CLIs do not wait indefinitely for more stdin input.
+  closeProcessInput(child);
   activeProcesses.set(executionId, child);
   let ended = false;
   const clearProcess = () => {
@@ -82,4 +89,4 @@ function cancelAllProcesses() {
   for (const executionId of activeProcesses.keys()) void cancelProcess(executionId);
 }
 
-module.exports = { startProcess, cancelProcess, cancelAllProcesses, evaluateExecutionGuardrails };
+module.exports = { startProcess, cancelProcess, cancelAllProcesses, evaluateExecutionGuardrails, closeProcessInput };

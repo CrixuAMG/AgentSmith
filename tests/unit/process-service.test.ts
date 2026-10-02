@@ -1,10 +1,11 @@
 import { createRequire } from 'node:module';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { evaluateExecutionGuardrails } = require('../../electron/process-service.cjs') as {
+const { evaluateExecutionGuardrails, closeProcessInput } = require('../../electron/process-service.cjs') as {
   evaluateExecutionGuardrails: (request: { prompt: string; guardrailProfile?: { rules: Array<Record<string, unknown>> } }) => void;
+  closeProcessInput: (child: { stdin?: { end: () => void } | null }) => void;
 };
 
 describe('execution guardrails', () => {
@@ -17,5 +18,13 @@ describe('execution guardrails', () => {
 
   it('rejects empty prompts', () => {
     expect(() => evaluateExecutionGuardrails({ prompt: '  ' })).toThrow('execution prompt');
+  });
+
+  it('closes stdin for one-shot provider processes', () => {
+    const end = vi.fn();
+
+    closeProcessInput({ stdin: { end } });
+
+    expect(end).toHaveBeenCalledOnce();
   });
 });
