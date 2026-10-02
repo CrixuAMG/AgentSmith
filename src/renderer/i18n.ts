@@ -126,6 +126,7 @@ const messages = {
       untracked: 'Untracked',
       conflicted: 'Conflicted',
       staged: 'staged',
+      unstaged: 'unstaged',
       clean: 'Working tree clean',
       cleanDetail: 'No staged, unstaged, or untracked changes were found.',
       readOnlyNotice: 'Git operations are read-only in this release.',
