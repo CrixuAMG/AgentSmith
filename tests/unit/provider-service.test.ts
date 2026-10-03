@@ -21,7 +21,7 @@ describe('provider command construction', () => {
   it('builds OpenCode arguments without shell concatenation or auto approval', () => {
     const result = buildExecutionCommand({ providerId: 'opencode', modelId: 'opencode/gpt-5.5', prompt: 'Inspect this change; do not mutate files.', projectPath: '/tmp/project', variant: { reasoningEffort: 'high' } }, installedProvider('opencode', '/usr/local/bin/opencode'));
     expect(result.executable).toBe('/usr/local/bin/opencode');
-    expect(result.args).toEqual(['run', '--model', 'opencode/gpt-5.5', '--variant', 'high', 'Inspect this change; do not mutate files.']);
+    expect(result.args).toEqual(['--dir', '/tmp/project', 'run', '--model', 'opencode/gpt-5.5', '--variant', 'high', 'Inspect this change; do not mutate files.']);
     expect(result.args).not.toContain('--auto');
     expect(result.cwd).toBe('/tmp/project');
   });

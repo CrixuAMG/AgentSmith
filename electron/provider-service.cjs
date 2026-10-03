@@ -173,7 +173,7 @@ function buildExecutionCommand(request, discovery) {
   if (!found?.installation.installed || !found.installation.executable) throw new Error(`${provider} is not installed.`);
   if (found.executionSupported === false) throw new Error(`${provider} does not expose a verified execution interface.`);
   if (provider === 'opencode') {
-    const args = ['run'];
+    const args = ['--dir', request.projectPath, 'run'];
     if (request.modelId) args.push('--model', request.modelId);
     if (typeof request.variant?.reasoningEffort === 'string') args.push('--variant', request.variant.reasoningEffort);
     args.push(request.prompt);

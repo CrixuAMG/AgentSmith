@@ -1,0 +1,6 @@
+{
+  "externalDirectory": {
+    "/Users/christiankaal/Code/CardGames/*": "allow",
+    "/Users/christiankaal/Code/AgentSmith/*": "allow"
+  }
+}

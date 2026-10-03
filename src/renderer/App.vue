@@ -184,4 +184,5 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalKeydown)
     </main>
   </div>
   <CommandPalette :open="paletteOpen" :commands="paletteCommands" :provider-status="providerStatus" @close="closePalette" @execute="executePaletteCommand" />
+  <PermissionGrantModal :open="!!pendingPermRequest" :request="pendingPermRequest" @grant="handlePermGrant" @deny="handlePermDeny" />
 </template>
