@@ -483,6 +483,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .suggestion-panel .prompt-card-heading p { max-width: 460px; margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.5; }
 .suggestion-text { max-height: 210px; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text-soft); font: 10px/1.7 'DM Mono', monospace; white-space: pre-wrap; }
 .suggestion-ideas { display: grid; gap: 2px; max-height: 240px; overflow: auto; }
+.suggestion-ideas .context-check span { white-space: pre-line; }
+.suggestion-ideas .context-check span::first-line { color: var(--text); font-weight: 600; }
 .suggestion-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .suggestion-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .suggestion-actions .secondary-button, .suggestion-actions .primary-button { min-height: 32px; }

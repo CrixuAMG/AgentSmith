@@ -80,13 +80,15 @@ describe('prompt studio suggestions', () => {
     await wrapper.find('button.suggestion-trigger').trigger('click');
     await flushPromises();
     expect(processCallback).not.toBeNull();
-    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. Add a searchable command palette\n2. Add keyboard shortcuts' });
+    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. Add a searchable command palette\nProblem: users cannot find actions quickly.\nProposal: expose the existing actions in one keyboard-driven surface.\n2. Add keyboard shortcuts\nProblem: repeated mouse navigation slows down the workflow.' });
     processCallback?.({ executionId: 'suggestion-1', kind: 'completed' });
     await flushPromises();
     expect(wrapper.find('.suggestion-panel').exists()).toBe(true);
     expect(savedSuggestions).toHaveLength(1);
     expect(wrapper.find('.suggestion-panel').text()).toContain('suggestions/Example/2026-10-02T01.md');
     expect(wrapper.find('.suggestion-text').text()).toContain('Perspective: Senior Backend Engineer');
+    expect(wrapper.find('.suggestion-ideas').text()).toContain('Add a searchable command palette');
+    expect(wrapper.find('.suggestion-ideas').text()).toContain('users cannot find actions quickly.');
 
     await buttonByText(wrapper, 'Another suggestion')?.trigger('click');
     await flushPromises();

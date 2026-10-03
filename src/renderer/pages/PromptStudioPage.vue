@@ -262,7 +262,7 @@ async function confirmExecution() {
     executionId.value = result.executionId;
     executionCommand.value = result.command;
     const job = store.jobs.find((item) => item.id === jobId);
-    if (job) { job.command = result.command; job.output.push({ kind: 'system', text: result.command }); }
+    if (job) { job.command = result.command; if (result.command) job.output.push({ kind: 'system', text: result.command }); }
     registerPromptJobExecution(jobId, result.executionId);
     await saveHistoryEntry({ command: result.command });
     store.activeJobId = jobId;
@@ -277,12 +277,31 @@ async function confirmExecution() {
 }
 
 function parseSuggestionIdeas(text: string) {
-  const ideas = text.split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^(?:[-*]|\d+[.)])\s+/.test(line))
-    .map((line) => line.replace(/^(?:[-*]|\d+[.)])\s+/, '').trim())
-    .filter(Boolean);
-  return ideas.length ? ideas : text.trim() ? [text.trim()] : [];
+  const ideas: string[] = [];
+  let current: { title: string; context: string[] } | null = null;
+
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const title = trimmed.match(/^(?:[-*]|\d+[.)])\s+(.+)$/)?.[1]?.trim();
+    if (title) {
+      if (current) {
+        const context = current.context.join(' ').trim();
+        ideas.push([current.title, context].filter(Boolean).join('\n\n'));
+      }
+      current = { title, context: [] };
+    } else if (current && trimmed) {
+      current.context.push(trimmed);
+    }
+  }
+
+  if (current) {
+    const context = current.context.join(' ').trim();
+    ideas.push([current.title, context].filter(Boolean).join('\n\n'));
+  }
+
+  if (ideas.length) return ideas;
+  const fallback = text.trim();
+  return fallback ? [fallback] : [];
 }
 
 async function finishSuggestion() {
