@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DE
 
 const savedSuggestions: string[] = [];
 const suggestionFailure: { message: string | null } = { message: null };
+let processCallback: ((event: { executionId: string; kind: string; text?: string }) => void) | null = null;
 
 vi.mock('@/renderer/services/api', () => ({
   api: {
@@ -20,14 +21,15 @@ vi.mock('@/renderer/services/api', () => ({
     listInstructions: async () => [],
     readInstruction: async () => '',
     readFile: async () => { throw new Error('unavailable'); },
-    discoverProviders: async () => [],
-    saveSuggestion: async (_project: unknown, content: string) => {
+     discoverProviders: async () => [{ installation: { providerId: 'opencode', installed: true, version: '1.0.0' }, models: [] }],
+     saveSuggestion: async (_project: unknown, content: string) => {
       if (suggestionFailure.message) throw new Error(suggestionFailure.message);
       savedSuggestions.push(content);
-      return { relativePath: `suggestions/Example/2026-10-02T0${savedSuggestions.length}.md`, absolutePath: `/tmp/${savedSuggestions.length}.md`, savedAt: '2026-10-02T00:00:00.000Z' };
-    },
-  },
-  onProcessEvent: () => () => {},
+       return { relativePath: `suggestions/Example/2026-10-02T0${savedSuggestions.length}.md`, absolutePath: `/tmp/${savedSuggestions.length}.md`, savedAt: '2026-10-02T00:00:00.000Z' };
+     },
+     startProcess: async () => ({ executionId: 'suggestion-1', command: 'opencode run <prompt>' }),
+   },
+   onProcessEvent: (callback: typeof processCallback) => { processCallback = callback; return () => { processCallback = null; }; },
 }));
 
 function snapshot() {
@@ -67,6 +69,7 @@ describe('prompt studio suggestions', () => {
     store.treeLoadedFor = null;
     store.promptFiles = [];
     store.git = null;
+    processCallback = null;
   });
 
   it('reveals the composer action, saves the prompt, and rotates on another suggestion', async () => {
@@ -76,12 +79,19 @@ describe('prompt studio suggestions', () => {
 
     await wrapper.find('button.suggestion-trigger').trigger('click');
     await flushPromises();
+    expect(processCallback).not.toBeNull();
+    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. Add a searchable command palette\n2. Add keyboard shortcuts' });
+    processCallback?.({ executionId: 'suggestion-1', kind: 'completed' });
+    await flushPromises();
     expect(wrapper.find('.suggestion-panel').exists()).toBe(true);
     expect(savedSuggestions).toHaveLength(1);
     expect(wrapper.find('.suggestion-panel').text()).toContain('suggestions/Example/2026-10-02T01.md');
     expect(wrapper.find('.suggestion-text').text()).toContain('Perspective: Senior Backend Engineer');
 
     await buttonByText(wrapper, 'Another suggestion')?.trigger('click');
+    await flushPromises();
+    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. Add a resilient queue' });
+    processCallback?.({ executionId: 'suggestion-1', kind: 'completed' });
     await flushPromises();
     expect(savedSuggestions).toHaveLength(2);
     expect(savedSuggestions[1]).not.toBe(savedSuggestions[0]);
@@ -94,12 +104,16 @@ describe('prompt studio suggestions', () => {
     await textarea.setValue('Keep the existing request.');
     await wrapper.find('button.suggestion-trigger').trigger('click');
     await flushPromises();
+    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. Add a test matrix' });
+    processCallback?.({ executionId: 'suggestion-1', kind: 'completed' });
+    await flushPromises();
 
-    await buttonByText(wrapper, 'Accept suggestion')?.trigger('click');
+    await wrapper.find('.suggestion-ideas input').setValue(true);
+    await buttonByText(wrapper, 'Execute selected ideas')?.trigger('click');
     await flushPromises();
 
     const value = (textarea.element as HTMLTextAreaElement).value;
-    expect(value).toContain(savedSuggestions[0]);
+    expect(value).toContain('Add a test matrix');
     expect(value).toContain('Keep the existing request.');
     expect(value.indexOf(savedSuggestions[0])).toBeLessThan(value.indexOf('Keep the existing request.'));
     expect(wrapper.find('.suggestion-meta').text()).toContain('Accepted into the task');
@@ -110,6 +124,9 @@ describe('prompt studio suggestions', () => {
     const wrapper = await mountStudio();
 
     await wrapper.find('button.suggestion-trigger').trigger('click');
+    await flushPromises();
+    processCallback?.({ executionId: 'suggestion-1', kind: 'stdout', text: '1. A suggestion' });
+    processCallback?.({ executionId: 'suggestion-1', kind: 'completed' });
     await flushPromises();
 
     expect(savedSuggestions).toHaveLength(0);

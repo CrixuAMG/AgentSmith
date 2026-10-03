@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import hljs from 'highlight.js/lib/common';
 
 import { composePrompt } from '@/shared/prompt-composer';
 import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
@@ -26,8 +25,6 @@ const copied = ref(false);
 const confirmationOpen = ref(false);
 const executionId = ref<string | null>(null);
 const executionState = ref<'idle' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
-type ExecutionOutputKind = 'stdout' | 'stderr' | 'system' | 'error';
-const executionOutput = ref<Array<{ kind: ExecutionOutputKind; text: string }>>([]);
 const exitCode = ref<number | null>(null);
 const executionCommand = ref<string | null>(null);
 const historyEntryId = ref<string | null>(null);
@@ -36,12 +33,11 @@ const suggestionStep = ref(0);
 const suggestionPath = ref<string | null>(null);
 const suggestionAccepted = ref(false);
 const suggestionBusy = ref(false);
-const autoScroll = ref(true);
-const outputModalOpen = ref(false);
-const outputContainer = ref<HTMLElement | null>(null);
-const outputModalContainer = ref<HTMLElement | null>(null);
+const suggestionExecutionId = ref<string | null>(null);
+const suggestionOutput = ref('');
+const suggestionIdeas = ref<string[]>([]);
+const selectedSuggestionIdeas = ref<string[]>([]);
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
-
 const contexts = reactive<PromptContextOptions>({
   globalInstructions: true,
   providerInstructions: true,
@@ -187,38 +183,6 @@ function toggleGoal(goalId: string) {
     : [...selectedGoalIds.value, goalId];
 }
 
-function cleanOutput(text: string) {
-  return text.replace(ansiEscapePattern, '');
-}
-
-function appendOutput(kind: ExecutionOutputKind, text: string) {
-  const cleanedText = cleanOutput(text);
-  if (cleanedText) executionOutput.value.push({ kind, text: cleanedText });
-}
-
-function outputLabel(kind: ExecutionOutputKind) {
-  if (kind === 'stderr') return 'LOG';
-  if (kind === 'error') return 'ERR';
-  if (kind === 'system') return 'SYS';
-  return 'OUT';
-}
-
-function highlightedOutput(text: string) {
-  if (!text.trim()) return '';
-  try {
-    return hljs.highlightAuto(text).value;
-  } catch {
-    return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  }
-}
-
-function highlightOutputElements() {
-  document.querySelectorAll<HTMLElement>('.execution-output .output-line > span:last-child').forEach((element) => {
-    const text = element.textContent ?? '';
-    element.innerHTML = highlightedOutput(text);
-  });
-}
-
 async function saveHistoryEntry(patch: Partial<PromptHistoryEntry>) {
   if (!project.value || !store.snapshot || !historyEntryId.value) return;
   const entries = store.snapshot.promptHistory[project.value.id] ?? [];
@@ -239,15 +203,6 @@ function historyContextNames(entry: PromptHistoryEntry) {
     .filter(([, enabled]) => enabled)
     .map(([key]) => t(`prompt.contextLabels.${key}`))
     .join(', ') || t('common.none');
-}
-
-async function scrollOutputToBottom() {
-  await nextTick();
-  highlightOutputElements();
-  if (!autoScroll.value) return;
-  [outputContainer.value, outputModalContainer.value].forEach((element) => {
-    if (element) element.scrollTop = element.scrollHeight;
-  });
 }
 
 function requestExecution() {
@@ -271,8 +226,6 @@ async function confirmExecution() {
   if (!project.value || !store.snapshot) return;
   confirmationOpen.value = false;
   executionState.value = 'running';
-  executionOutput.value = [];
-  appendOutput('system', `${t('prompt.running')} · ${project.value.path}`);
   exitCode.value = null;
   const entry: PromptHistoryEntry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -311,7 +264,6 @@ async function confirmExecution() {
     const job = store.jobs.find((item) => item.id === jobId);
     if (job) { job.command = result.command; job.output.push({ kind: 'system', text: result.command }); }
     registerPromptJobExecution(jobId, result.executionId);
-    appendOutput('system', result.command);
     await saveHistoryEntry({ command: result.command });
     store.activeJobId = jobId;
     store.activeView = 'prompt-job';
@@ -324,21 +276,54 @@ async function confirmExecution() {
   }
 }
 
-async function cancelExecution() {
-  if (executionId.value) await api.cancelProcess(executionId.value);
-  executionState.value = 'cancelled';
+function parseSuggestionIdeas(text: string) {
+  const ideas = text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^(?:[-*]|\d+[.)])\s+/.test(line))
+    .map((line) => line.replace(/^(?:[-*]|\d+[.)])\s+/, '').trim())
+    .filter(Boolean);
+  return ideas.length ? ideas : text.trim() ? [text.trim()] : [];
+}
+
+async function finishSuggestion() {
+  if (!project.value || !suggestion.value) return;
+  suggestionIdeas.value = parseSuggestionIdeas(suggestionOutput.value);
+  selectedSuggestionIdeas.value = [];
+  try {
+    const saved = await api.saveSuggestion(project.value, suggestionOutput.value);
+    suggestionPath.value = saved.relativePath;
+  } catch (error) {
+    suggestion.value = null;
+    suggestionIdeas.value = [];
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    suggestionBusy.value = false;
+    suggestionExecutionId.value = null;
+  }
+}
+
+function handleSuggestionEvent(event: { executionId: string; kind: string; text?: string }) {
+  if (!suggestionBusy.value) return;
+  if (!suggestionExecutionId.value) suggestionExecutionId.value = event.executionId;
+  if (event.executionId !== suggestionExecutionId.value) return;
+  if (event.kind === 'stdout' || event.kind === 'stderr') suggestionOutput.value += (event.text ?? '').replace(ansiEscapePattern, '');
+  if (event.kind === 'completed') void finishSuggestion();
+  if (event.kind === 'failed' || event.kind === 'cancelled') {
+    suggestionBusy.value = false;
+    suggestionExecutionId.value = null;
+    localError.value = event.text ?? t('prompt.suggestionFailed');
+  }
 }
 
 function handleProcessEvent(event: { executionId: string; kind: string; text?: string; exitCode?: number | null }) {
+  handleSuggestionEvent(event);
   if (event.executionId !== executionId.value && event.kind !== 'started') return;
   if (event.kind === 'started') executionId.value = event.executionId;
-  if (event.kind === 'stdout' || event.kind === 'stderr') appendOutput(event.kind, event.text ?? '');
   if (event.kind === 'completed') { executionState.value = 'completed'; exitCode.value = event.exitCode ?? 0; void saveHistoryEntry({ status: 'completed', exitCode: exitCode.value }); }
   if (event.kind === 'failed') {
     executionState.value = 'failed';
     exitCode.value = event.exitCode ?? null;
     void saveHistoryEntry({ status: 'failed', exitCode: exitCode.value });
-    if (event.text) appendOutput('error', event.text);
   }
   if (event.kind === 'cancelled') { executionState.value = 'cancelled'; void saveHistoryEntry({ status: 'cancelled' }); }
 }
@@ -358,31 +343,36 @@ async function generateSuggestion() {
       goals: goals.value,
       step: suggestionStep.value,
     });
-    const saved = await api.saveSuggestion(project.value, next.text);
-    suggestionStep.value += 1;
+    if (!currentDiscovery.value?.installation.installed) throw new Error(t('prompt.noProvider'));
+    suggestionOutput.value = '';
+    suggestionIdeas.value = [];
+    selectedSuggestionIdeas.value = [];
     suggestion.value = next;
-    suggestionPath.value = saved.relativePath;
+    const result = await api.startProcess({ providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: next.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value });
+    suggestionExecutionId.value = result.executionId;
+    suggestionStep.value += 1;
+    suggestionPath.value = null;
     suggestionAccepted.value = false;
   } catch (error) {
-    localError.value = error instanceof Error ? error.message : String(error);
-  } finally {
     suggestionBusy.value = false;
+    localError.value = error instanceof Error ? error.message : String(error);
   }
 }
 
-function acceptSuggestion() {
-  if (!suggestion.value) return;
+function executeSelectedSuggestions() {
+  if (!selectedSuggestionIdeas.value.length) return;
+  const selected = selectedSuggestionIdeas.value.join('\n\n');
   const existing = task.value.trim();
-  task.value = existing ? `${suggestion.value.text}\n\n---\n\n${existing}` : suggestion.value.text;
+  task.value = existing ? `${selected}\n\n---\n\n${existing}` : selected;
   suggestionAccepted.value = true;
+  requestExecution();
 }
+
+const acceptSuggestion = executeSelectedSuggestions;
 
 watch(project, () => { void loadContext(); });
 watch(() => store.selectedFilePath, () => { if (store.selectedFilePath) contexts.selectedFiles = true; });
 watch(() => store.promptFiles.length, () => { if (store.promptFiles.length) contexts.selectedFiles = true; });
-watch(() => executionOutput.value.length, () => { void scrollOutputToBottom(); });
-watch(autoScroll, (enabled) => { if (enabled) void scrollOutputToBottom(); });
-watch(outputModalOpen, (open) => { if (open) void scrollOutputToBottom(); });
 watch(() => contexts.gitDiff, async (enabled) => {
   if (!enabled || !project.value || !store.git?.changes.length) return;
   const firstChange = store.git.changes.find((change) => change.kind !== 'deleted');
@@ -413,11 +403,10 @@ onUnmounted(() => { removeProcessListener?.(); });
 
       <div class="prompt-main-grid"><div class="prompt-controls"><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.role') }} / {{ t('prompt.guardrail') }}</span></div><label class="form-field"><span>{{ t('prompt.role') }}</span><select v-model="selectedRoleId"><option :value="null">{{ t('profiles.noRole') }}</option><option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option></select></label><label class="form-field"><span>{{ t('prompt.guardrail') }}</span><select v-model="selectedGuardrailId"><option :value="null">{{ t('profiles.noGuardrail') }}</option><option v-for="profile in store.snapshot?.guardrails" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label></section><section class="prompt-section-card"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.goals') }}</span><span class="mono">{{ selectedGoalIds.length.toString().padStart(2, '0') }}</span></div><div class="goal-check-list"><label v-for="goal in store.snapshot?.goals" :key="goal.id" class="check-field"><input type="checkbox" :checked="selectedGoalIds.includes(goal.id)" :disabled="!goal.enabled" @change="toggleGoal(goal.id)"><span>{{ goal.name }}</span></label></div></section><section class="prompt-section-card"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.context') }}</span><p>{{ t('prompt.contextDetail') }}</p></div></div><label class="context-check"><input v-model="contexts.globalInstructions" type="checkbox"><span>{{ t('prompt.global') }}</span></label><label class="context-check"><input v-model="contexts.projectInstructions" type="checkbox"><span>{{ t('prompt.projectInstructions') }}</span></label><label class="context-check"><input v-model="contexts.nestedInstructions" type="checkbox"><span>{{ t('prompt.nestedInstructions') }}</span></label><label class="context-check"><input v-model="contexts.gitStatus" type="checkbox"><span>{{ t('prompt.gitStatus') }}</span></label><label class="context-check"><input v-model="contexts.gitDiff" type="checkbox"><span>{{ t('prompt.gitDiff') }}</span></label><label class="context-check"><input v-model="contexts.projectStructure" type="checkbox"><span>{{ t('prompt.structure') }}</span></label><label class="context-check"><input v-model="contexts.selectedFiles" type="checkbox" :disabled="!store.selectedFile"><span>{{ t('prompt.selectedFiles') }}</span></label><span class="context-hint">{{ store.selectedFile ? store.selectedFile.relativePath : t('prompt.selectFilesHint') }}</span></section></div><div class="prompt-composer-area"><section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section><section v-if="suggestion" class="suggestion-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.suggestion') }} / {{ suggestion.angleLabel }}</span><p>{{ t('prompt.suggestionDetail') }}</p></div><span class="mono">{{ suggestion.round.toString().padStart(2, '0') }}</span></div><pre class="suggestion-text">{{ suggestion.text }}</pre><div class="suggestion-meta"><span class="mono truncate">{{ suggestionPath }}</span><span v-if="suggestionAccepted" class="status-pill">{{ t('prompt.suggestionAccepted') }}</span></div><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="primary-button" type="button" :disabled="suggestionAccepted" @click="acceptSuggestion">{{ t('prompt.acceptSuggestion') }} <span>↗</span></button></div></section><section class="prompt-preview"><div class="preview-header"><div><span class="eyebrow">{{ t('prompt.preview') }}</span><strong>{{ composition.text.length.toLocaleString() }} chars</strong></div><button class="secondary-button" type="button" @click="copyPrompt">{{ copied ? t('prompt.copied') : t('prompt.copy') }}</button></div><div class="preview-sections"><button v-for="section in composition.sections" :key="section.id" class="preview-section-tab" :class="{ active: selectedSectionId === section.id, included: section.included }" type="button" @click="selectedSectionId = section.id"><span>{{ section.included ? '✓' : '—' }}</span>{{ section.title }}</button></div><div class="selected-section"><div class="selected-section-heading"><span>{{ selectedSection?.title }}</span><span class="mono">{{ selectedSection?.included ? t('common.enabled') : t('common.disabled') }}</span></div><pre>{{ selectedSection?.content || t('common.none') }}</pre></div><details class="full-prompt-details"><summary>{{ t('prompt.preview') }} / {{ t('prompt.sections') }}</summary><pre>{{ composition.text }}</pre></details><div v-if="composition.blockedContexts.length" class="blocked-contexts"><strong>{{ t('prompt.blocked') }}</strong><span v-for="blocked in composition.blockedContexts" :key="blocked.path">{{ blocked.path }} · {{ blocked.reason }}</span></div></section></div></div>
 
-      <section class="execution-panel"><div class="execution-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ executionState === 'idle' ? t('prompt.idle') : t(`prompt.${executionState}`) }}</strong></div><div class="execution-actions"><span v-if="executionCommand" class="mono execution-command">{{ executionCommand }}</span><span v-if="exitCode !== null" class="mono">{{ t('prompt.exitCode') }} {{ exitCode }}</span><label class="toggle-field output-toggle"><input v-model="autoScroll" type="checkbox"><span class="toggle-track"></span><span>{{ t('prompt.autoScroll') }}</span></label><button v-if="executionOutput.length" class="secondary-button" type="button" @click="outputModalOpen = true">{{ t('prompt.popout') }}</button><button v-if="executionState === 'running'" class="danger-button" type="button" @click="cancelExecution">{{ t('prompt.cancel') }}</button><button v-else-if="executionOutput.length" class="secondary-button" type="button" @click="executionOutput = []">{{ t('prompt.clearOutput') }}</button></div></div><div v-if="executionOutput.length" ref="outputContainer" class="execution-output"><div v-for="(line, index) in executionOutput" :key="`${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ outputLabel(line.kind) }}</span><span>{{ line.text }}</span></div></div><div v-else class="execution-idle"><span class="empty-mark">›_</span><span>{{ t('prompt.confirmation') }}</span></div></section>
+      <div class="prompt-composer-area"><section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button></div></section><section v-if="suggestion" class="suggestion-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.suggestion') }} / {{ suggestion.angleLabel }}</span><p>{{ t('prompt.suggestionDetail') }}</p></div><span class="mono">{{ suggestion.round.toString().padStart(2, '0') }}</span></div><pre class="suggestion-text">{{ suggestionOutput || t('prompt.suggesting') }}</pre><div v-if="suggestionIdeas.length" class="suggestion-ideas"><label v-for="idea in suggestionIdeas" :key="idea" class="context-check"><input v-model="selectedSuggestionIdeas" type="checkbox" :value="idea"><span>{{ idea }}</span></label></div><div class="suggestion-meta"><span class="mono truncate">{{ suggestionPath ?? t('prompt.suggesting') }}</span><span v-if="suggestionAccepted" class="status-pill">{{ t('prompt.suggestionAccepted') }}</span></div><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="primary-button" type="button" :disabled="suggestionBusy || !selectedSuggestionIdeas.length || suggestionAccepted" @click="executeSelectedSuggestions">{{ t('prompt.executeSuggestions') }} <span>↗</span></button></div></section><section class="prompt-preview"><div class="preview-header"><div><span class="eyebrow">{{ t('prompt.preview') }}</span><strong>{{ composition.text.length.toLocaleString() }} chars</strong></div><button class="secondary-button" type="button" @click="copyPrompt">{{ copied ? t('prompt.copied') : t('prompt.copy') }}</button></div><div class="preview-sections"><button v-for="section in composition.sections" :key="section.id" class="preview-section-tab" :class="{ active: selectedSectionId === section.id, included: section.included }" type="button" @click="selectedSectionId = section.id"><span>{{ section.included ? '✓' : '—' }}</span>{{ section.title }}</button></div><div class="selected-section"><div class="selected-section-heading"><span>{{ selectedSection?.title }}</span><span class="mono">{{ selectedSection?.included ? t('common.enabled') : t('common.disabled') }}</span></div><pre>{{ selectedSection?.content || t('common.none') }}</pre></div><details class="full-prompt-details"><summary>{{ t('prompt.preview') }} / {{ t('prompt.sections') }}</summary><pre>{{ composition.text }}</pre></details></section></div>
     </template>
 
     <div v-if="confirmationOpen" class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('prompt.preflight') }}</span><h2>{{ t('prompt.confirm') }}</h2><p>{{ t('prompt.confirmation') }}</p><div class="confirm-summary"><span><b>{{ t('prompt.provider') }}</b>{{ selectedProviderId }}</span><span><b>{{ t('prompt.model') }}</b>{{ selectedModelId ?? t('profiles.noModel') }}</span><span><b>{{ t('prompt.project') }}</b>{{ project?.path }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ guardrail?.name ?? t('profiles.noGuardrail') }}</span></div><div class="modal-actions"><button class="secondary-button" type="button" @click="confirmationOpen = false; executionState = 'idle'">{{ t('prompt.cancel') }}</button><button class="primary-button" type="button" @click="confirmExecution">{{ t('prompt.confirm') }} <span>↗</span></button></div></section></div>
-    <div v-if="outputModalOpen" class="modal-backdrop output-modal-backdrop" @click.self="outputModalOpen = false"><section class="output-modal" role="dialog" aria-modal="true" :aria-label="t('prompt.output')"><div class="output-modal-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ executionState === 'idle' ? t('prompt.idle') : t(`prompt.${executionState}`) }}</strong></div><button class="secondary-button" type="button" @click="outputModalOpen = false">{{ t('prompt.closeOutput') }}</button></div><div ref="outputModalContainer" class="execution-output output-modal-content"><div v-for="(line, index) in executionOutput" :key="`modal-${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ outputLabel(line.kind) }}</span><span>{{ line.text }}</span></div></div></section></div>
   </div>
   <section v-if="project" class="prompt-section-card prompt-context-extra"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.context') }} / {{ t('prompt.project') }}</span><p>{{ t('prompt.contextDetail') }}</p></div></div><label class="context-check"><input v-model="contexts.providerInstructions" type="checkbox"><span>{{ t('prompt.providerInstructions') }}</span></label><label class="context-check"><input v-model="contexts.readme" type="checkbox"><span>{{ t('prompt.readme') }}</span></label><label class="context-check"><input v-model="contexts.composerJson" type="checkbox"><span>{{ t('prompt.composerJson') }}</span></label><label class="context-check"><input v-model="contexts.packageJson" type="checkbox"><span>{{ t('prompt.packageJson') }}</span></label></section>
 </template>
