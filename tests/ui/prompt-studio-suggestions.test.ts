@@ -185,4 +185,14 @@ describe('prompt studio suggestions', () => {
     expect(wrapper.find('.history-settings').text()).toContain('Global instructions');
     expect(wrapper.find('.history-settings').text()).toContain('reasoningEffort: high');
   });
+
+  it('keeps context sources, task description, and prompt review inside the studio layout', async () => {
+    const wrapper = await mountStudio();
+
+    const contextSources = wrapper.find('.prompt-context-extra');
+    expect(contextSources.exists()).toBe(true);
+    expect(contextSources.element.closest('.prompt-page')).not.toBeNull();
+    expect(wrapper.find('.task-editor').element.closest('.prompt-page')).not.toBeNull();
+    expect(wrapper.find('.prompt-preview').element.closest('.prompt-page')).not.toBeNull();
+  });
 });
