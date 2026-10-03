@@ -64,6 +64,9 @@ const instructionOverlapWarning = computed(() => {
     : null;
 });
 
+const externalPathsText = ref('');
+
+
 async function loadWorkspace() {
   if (!project.value) return;
   busy.value = true;
@@ -132,6 +135,11 @@ async function chooseProject(projectId: string) {
   candidate.lastOpenedAt = new Date().toISOString();
   await selectProject(projectId);
   await persist('projects', projects.value);
+  if (project.value?.allowedExternalPaths) {
+    externalPathsText.value = project.value.allowedExternalPaths.join('\n');
+  } else {
+    externalPathsText.value = '';
+  }
   await loadWorkspace();
 }
 
@@ -460,6 +468,13 @@ onBeforeUnmount(() => {
           <div v-else class="instructions-layout">
             <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="requestInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
             <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !store.instructionDirty" @click="requestSaveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="store.instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="store.instructionDirty = true"></textarea><div class="editor-footer mono">{{ store.instructionDirty ? t('instructions.unsaved') : t('instructions.atomicNotice') }}</div></div>
+            <div class="external-permissions-panel">
+            <div class="panel-toolbar"><span class="eyebrow">External directory access</span></div>
+            <p class="small muted">Allow OpenCode to access external directories for this project (project scope). Add one per line.</p>
+            <textarea v-model="externalPathsText" rows="4" class="instruction-textarea" placeholder="/Users/christiankaal/Code/CardGames/*&#10;/Users/christiankaal/Code/Other/*"></textarea>
+            <button class="primary-button" type="button" @click="saveExternalPaths">Save permissions</button>
+          </div>
+
           </div>
         </template>
       </section>
@@ -467,3 +482,18 @@ onBeforeUnmount(() => {
     <div v-if="draftPromptOpen" class="modal-backdrop"><section class="confirm-modal draft-confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('instructions.unsavedEyebrow') }}</span><h2>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteTitle') : t('instructions.unsavedTitle') }}</h2><p>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteDetail') : t('instructions.unsavedDetail') }}</p><div class="modal-actions"><button class="secondary-button" type="button" @click="cancelDraftPrompt">{{ t('common.cancel') }}</button><button v-if="draftPromptMode === 'switch'" class="danger-button" type="button" @click="discardDraftAndContinue">{{ t('instructions.discardDraft') }}</button><button class="primary-button" type="button" @click="saveDraftAndContinue">{{ t('common.save') }}</button></div></section></div>
   </div>
 </template>
+
+async function saveExternalPaths() {
+  if (!project.value) return;
+  const paths = externalPathsText.value
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p);
+  project.value.allowedExternalPaths = paths;
+  await persist('projects', store.snapshot?.projects ?? []);
+  try {
+    await api.syncPermissions({ project: project.value, allowedExternalPaths: paths, allowedExternalPathsGlobal: store.snapshot?.config.allowedExternalPathsGlobal || [] });
+  } catch (e) {
+    // ignore
+  }
+}
