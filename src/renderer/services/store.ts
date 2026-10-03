@@ -97,6 +97,7 @@ function applyProcessEvent(job: PromptJob, event: ExecutionEvent) {
   if (event.jobId) job.id = event.jobId;
   if (!job.executionId) job.executionId = event.executionId;
   if (event.command) job.command = event.command;
+  if (event.kind === 'started' || event.command) void saveJobHistory(job);
   if (event.kind === 'stdout' || event.kind === 'stderr') job.output.push({ kind: event.kind, text: event.text ?? '' });
   if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
     job.state = event.kind;

@@ -14,6 +14,7 @@ import type {
   InstructionFile,
   Project,
   ProjectFileNode,
+  PromptJob,
   ResourceKey,
   SavedSuggestion,
 } from '@/shared/types';
@@ -29,6 +30,7 @@ const fallbackSnapshot: AppSnapshot = {
   globalInstructions: '',
   providerInstructions: {},
   promptHistory: {},
+  promptJobs: [],
   storageRoot: '~/.config/AgentSmith',
   warnings: [],
 };
@@ -107,6 +109,10 @@ function browserApi(): AgentSmithApi {
       throw new Error('Process execution requires the desktop application.');
     },
     async cancelProcess() {},
+    async listPromptJobs(): Promise<PromptJob[]> {
+      return [];
+    },
+    async syncPermissions() { return { ok: false } as any; },
     onProcessEvent(callback) {
       listeners.add(callback);
       return () => listeners.delete(callback);
@@ -131,15 +137,17 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     scanProject: (project, options) => bridge.scanProject(toPlainIpcValue(project), toPlainIpcValue(options)),
     readFile: (project, relativePath, guardrails) => bridge.readFile(toPlainIpcValue(project), relativePath, toPlainIpcValue(guardrails)),
     gitStatus: (project) => bridge.gitStatus(toPlainIpcValue(project)),
-    gitDiff: (project, relativePath, staged) => bridge.gitDiff(toPlainIpcValue(project), relativePath, staged),
+    gitDiff: (project, relativePath, staged, guardrails) => bridge.gitDiff(toPlainIpcValue(project), relativePath, staged, toPlainIpcValue(guardrails)),
     gitLog: (project, options) => bridge.gitLog(toPlainIpcValue(project), toPlainIpcValue(options)),
     gitBranches: (project) => bridge.gitBranches(toPlainIpcValue(project)),
     gitPush: (project) => bridge.gitPush(toPlainIpcValue(project)),
     listInstructions: (project) => bridge.listInstructions(toPlainIpcValue(project)),
-    readInstruction: (project, relativePath) => bridge.readInstruction(toPlainIpcValue(project), relativePath),
+    readInstruction: (project, relativePath, guardrails) => bridge.readInstruction(toPlainIpcValue(project), relativePath, toPlainIpcValue(guardrails)),
     writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
     saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
+    listPromptJobs: () => bridge.listPromptJobs(),
+    syncPermissions: (payload) => bridge.syncPermissions(toPlainIpcValue(payload)),
   };
 }
 

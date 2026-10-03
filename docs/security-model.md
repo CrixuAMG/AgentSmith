@@ -21,8 +21,8 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * After the directory is created, its real path is resolved and must still be inside the suggestions root, so a pre-planted symlink cannot redirect the write. The operation fails closed.
 * Files are created with an exclusive flag at mode `0o600`; an existing suggestion is never truncated or replaced, and a name collision allocates the next free suffix instead of overwriting.
 * Bodies must be UTF-8 text within 256 KB. A rejected body leaves the tree untouched.
-* The suggestion composer embeds the project name, role, and goal labels only. It never copies file contents, and it never embeds the absolute project path.
-* A suggestion is not executed. It becomes executable only after the user accepts it into the task field and completes the existing preflight confirmation, so guardrails and provider confirmation still apply.
+* The suggestion composer embeds the project name, role, and goal labels only. It never copies file contents, and it never embeds the absolute project path; the resulting prompt is sent to the explicitly selected provider only after the UI discloses that boundary.
+* A suggestion generation is a provider execution and is recorded as a separate durable job. A generated idea is not executed as a development task; it becomes task content only after the user accepts it and then completes the existing preflight confirmation, so guardrails and provider confirmation still apply.
 * There is no read, list, or delete operation for suggestions. The surface is write-only and append-only.
 
 ## Configuration Rules

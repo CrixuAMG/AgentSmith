@@ -1,5 +1,5 @@
 const { spawn } = require('node:child_process');
-const { canonicalRoot, safePath } = require('./project-service.cjs');
+const { canonicalRoot, safePath, readAllowed } = require('./project-service.cjs');
 
 const LOG_FORMAT = '%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e';
 // `for-each-ref` does not expand %x escapes, so the branch format uses literal tabs.
@@ -117,8 +117,10 @@ async function gitStatus(project) {
   return { isRepository: true, error: null, ...parseStatus(result.stdout) };
 }
 
-async function gitDiff(project, relativePath, staged) {
+async function gitDiff(project, relativePath, staged, guardrails) {
   const target = await safePath(project, relativePath, { mustExist: false });
+  const permission = readAllowed(target.relativePath, guardrails);
+  if (!permission.allowed) throw new Error(permission.reason);
   const tracked = await runGit(['ls-files', '--error-unmatch', '--', target.relativePath], target.root);
   if (tracked.code !== 0) {
     const untracked = await runGit(['diff', '--no-index', '--no-ext-diff', '--text', '--unified=80', '/dev/null', target.candidate], target.root);

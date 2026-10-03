@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -66,5 +66,8 @@ describe('project filesystem boundaries', () => {
     expect(instructions.map((item) => item.relativePath)).toEqual(['@global/AGENTS.md', 'AGENTS.md', 'frontend/AGENTS.md']);
     expect(await readFile(path.join(project.path, 'frontend/AGENTS.md'), 'utf8')).toBe('# Frontend\n');
     await expect(projectService.writeInstruction(project, 'AGENTS.md', 'replacement', false, globalPath)).rejects.toThrow();
+    await projectService.writeInstruction(project, 'AGENTS.md', 'replacement', true, globalPath);
+    expect(await readFile(path.join(project.path, 'AGENTS.md'), 'utf8')).toBe('replacement');
+    expect((await readdir(project.path)).some((name) => name.startsWith('AGENTS.md.bak-'))).toBe(true);
   });
 });

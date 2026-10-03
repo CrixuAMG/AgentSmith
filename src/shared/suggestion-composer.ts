@@ -34,7 +34,7 @@ export const SUGGESTION_ANGLES: SuggestionAngle[] = [
 
 const DISCIPLINE_RULES: Array<{ discipline: SuggestionDiscipline; pattern: RegExp }> = [
   { discipline: 'security', pattern: /secur|privacy|trust|threat/i },
-  { discipline: 'frontend', pattern: /front|\bui\b|\bux\b|vue|accessib|visual|theme|interaction/i },
+  { discipline: 'frontend', pattern: /front|\bui\b|\bux\b|design|\bux\b|\bui\b|vue|accessib|visual|theme|interaction/i },
   { discipline: 'quality', pattern: /quality|\bqa\b|test|verif|regression/i },
   { discipline: 'backend', pattern: /back|\bapi\b|php|symfony|server|platform|services?|database/i },
   { discipline: 'architecture', pattern: /architect|design|structure|boundar/i },
@@ -63,6 +63,13 @@ const DISCIPLINE_SEEDS: Record<SuggestionDiscipline, string[]> = {
     'a keyboard-driven command palette over the current workspace actions',
     'a saved view layout so panel sizes and visibility survive a restart',
     'one consistent pattern for inline validation and error recovery',
+    'a clearer information hierarchy and layout that matches existing components',
+    'improved form UX: validation, error messages, and recovery paths',
+    'empty states and loading skeletons for the most visited views',
+    'keyboard accessibility and focus management improvements',
+    'consistent spacing/typography using existing design tokens/styles',
+    'a small UX tweak to the screen used most often that removes one click',
+    'better responsive behavior for common breakpoints',
   ],
   quality: [
     'a deterministic test matrix for the highest-risk pure domain functions',
@@ -128,6 +135,10 @@ export function composeSuggestionPrompt(input: SuggestionInput): FeatureSuggesti
     ? `Priorities in scope: ${goals.map((goal) => goal.name).join(', ')}.`
     : 'No development goals are selected, so make the tradeoffs explicit instead.';
 
+  const roleGuidance = input.role?.instructions?.length
+    ? `Role-specific guidance (follow these):\n${input.role.instructions.map((i) => `- ${i}`).join('\n')}`
+    : '';
+
   const text = [
     `# ${angle.label}: ${input.project.name}`,
     '',
@@ -138,13 +149,16 @@ export function composeSuggestionPrompt(input: SuggestionInput): FeatureSuggesti
     perspective,
     priorities,
     '',
+    discipline === 'frontend' ? 'Inspect existing frontend files (components, views/pages, layouts, styles, composables) and base proposals on current patterns.' : '',
+    roleGuidance,
+    '',
     'Consider these directions if they fit the codebase:',
     ...DISCIPLINE_SEEDS[discipline].map((seed) => `- ${seed}`),
     '',
     ...OUTLINE,
     '',
     'Rank the proposals, recommend one, and name the first step you would take. Do not write code yet.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   return { angleId: angle.id, angleLabel: angle.label, discipline, round, title: `${angle.label}: ${input.project.name}`, text };
 }

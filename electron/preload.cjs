@@ -8,17 +8,19 @@ const api = {
   scanProject: (project, options) => ipcRenderer.invoke('projects:scan', project, options),
   readFile: (project, relativePath, guardrails) => ipcRenderer.invoke('files:read', project, relativePath, guardrails),
   gitStatus: (project) => ipcRenderer.invoke('git:status', project),
-  gitDiff: (project, relativePath, staged) => ipcRenderer.invoke('git:diff', project, relativePath, staged),
+  gitDiff: (project, relativePath, staged, guardrails) => ipcRenderer.invoke('git:diff', project, relativePath, staged, guardrails),
   gitLog: (project, options) => ipcRenderer.invoke('git:log', project, options),
   gitBranches: (project) => ipcRenderer.invoke('git:branches', project),
   gitPush: (project) => ipcRenderer.invoke('git:push', project),
   listInstructions: (project) => ipcRenderer.invoke('instructions:list', project),
-  readInstruction: (project, relativePath) => ipcRenderer.invoke('instructions:read', project, relativePath),
+  readInstruction: (project, relativePath, guardrails) => ipcRenderer.invoke('instructions:read', project, relativePath, guardrails),
   writeInstruction: (project, relativePath, content, overwrite) => ipcRenderer.invoke('instructions:write', project, relativePath, content, overwrite),
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   saveSuggestion: (project, content) => ipcRenderer.invoke('suggestions:save', project, content),
   startProcess: (request) => ipcRenderer.invoke('process:start', request),
   cancelProcess: (executionId) => ipcRenderer.invoke('process:cancel', executionId),
+  listPromptJobs: () => ipcRenderer.invoke('process:list'),
+  syncPermissions: (payload) => ipcRenderer.invoke('permissions:sync', payload),
   onProcessEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('process:event', listener);

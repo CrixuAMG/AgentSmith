@@ -126,6 +126,22 @@ export const DEFAULT_ROLES: Role[] = [
   },
   {
     version: 1,
+    id: 'ui-ux-designer',
+    name: 'UI/UX Designer',
+    description: 'UX/UI designer focused on usability, accessibility, visual consistency, and user flows.',
+    instructions: [
+      'Prioritize the primary user flows and remove unnecessary friction.',
+      'Focus on accessibility: keyboard navigation, visible focus, ARIA where appropriate, and reduced motion.',
+      'Keep visual language consistent with existing components, styles, spacing, and tokens.',
+      'Suggest concrete UI changes grounded in the actual frontend files in this repo.',
+      'Consider empty states, loading states, error states, forms, and responsive behavior.',
+      'Prefer small, testable UX improvements over large rewrites.',
+    ],
+    tags: ['frontend', 'design', 'ux', 'ui', 'accessibility'],
+    enabled: true,
+  },
+  {
+    version: 1,
     id: 'qa-engineer',
     name: 'QA Engineer',
     description: 'Quality engineer focused on observable behavior, regressions, and edge cases.',

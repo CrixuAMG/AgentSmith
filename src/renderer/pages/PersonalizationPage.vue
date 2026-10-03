@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, toRaw, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import type { Goal, GuardrailProfile } from '@/shared/types';
@@ -24,9 +24,18 @@ function idFor(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+// Records come from the reactive store, and structuredClone rejects Vue proxies.
+function cloneGoal(goal: Goal): Goal {
+  return structuredClone(toRaw(goal));
+}
+
+function cloneGuardrail(profile: GuardrailProfile): GuardrailProfile {
+  return structuredClone(toRaw(profile));
+}
+
 function selectGoal(goal: Goal) {
   selectedGoalId.value = goal.id;
-  goalDraft.value = structuredClone(goal);
+  goalDraft.value = cloneGoal(goal);
   savedState.value = true;
 }
 
@@ -41,8 +50,8 @@ async function saveGoal() {
   if (!store.snapshot || !goalDraft.value || !goalDraft.value.name.trim()) return;
   goalDraft.value.name = goalDraft.value.name.trim();
   const existingIndex = store.snapshot.goals.findIndex((goal) => goal.id === goalDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.goals.push(structuredClone(goalDraft.value));
-  else store.snapshot.goals[existingIndex] = structuredClone(goalDraft.value);
+  if (existingIndex === -1) store.snapshot.goals.push(cloneGoal(goalDraft.value));
+  else store.snapshot.goals[existingIndex] = cloneGoal(goalDraft.value);
   selectedGoalId.value = goalDraft.value.id;
   await persist('goals', store.snapshot.goals);
   selectGoal(store.snapshot.goals.find((goal) => goal.id === goalDraft.value?.id)!);
@@ -72,7 +81,7 @@ async function moveGoal(direction: -1 | 1) {
 
 function selectGuardrail(profile: GuardrailProfile) {
   selectedGuardrailId.value = profile.id;
-  guardrailDraft.value = structuredClone(profile);
+  guardrailDraft.value = cloneGuardrail(profile);
   savedState.value = true;
 }
 
@@ -98,8 +107,8 @@ async function saveGuardrail() {
   if (!store.snapshot || !guardrailDraft.value || !guardrailDraft.value.name.trim()) return;
   guardrailDraft.value.name = guardrailDraft.value.name.trim();
   const existingIndex = store.snapshot.guardrails.findIndex((profile) => profile.id === guardrailDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.guardrails.push(structuredClone(guardrailDraft.value));
-  else store.snapshot.guardrails[existingIndex] = structuredClone(guardrailDraft.value);
+  if (existingIndex === -1) store.snapshot.guardrails.push(cloneGuardrail(guardrailDraft.value));
+  else store.snapshot.guardrails[existingIndex] = cloneGuardrail(guardrailDraft.value);
   selectedGuardrailId.value = guardrailDraft.value.id;
   await persist('guardrails', store.snapshot.guardrails);
   selectGuardrail(store.snapshot.guardrails.find((profile) => profile.id === guardrailDraft.value?.id)!);

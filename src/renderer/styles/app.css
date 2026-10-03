@@ -428,6 +428,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* Prompt Studio */
 .prompt-heading { margin-bottom: 28px; }
 .prompt-job-task { max-width: 760px; overflow: hidden; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; }
+.job-switcher { display: flex; align-items: stretch; gap: 7px; margin-bottom: 10px; padding: 10px; border: 1px solid var(--line); background: var(--panel); overflow: auto; }
+.job-switcher > .eyebrow { display: flex; align-items: center; padding: 0 8px; white-space: nowrap; }
+.job-switcher button { display: grid; gap: 4px; min-width: 170px; padding: 8px 10px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text-soft); text-align: left; cursor: pointer; }
+.job-switcher button.active, .job-switcher button:hover { border-color: rgba(140, 230, 163, .35); background: var(--green-dim); color: var(--text); }
+.job-switcher strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.job-switcher small { color: var(--text-faint); font: 9px 'DM Mono', monospace; text-transform: uppercase; }
 .prompt-job-settings { margin-bottom: 10px; }
 .prompt-job-output { display: flex; flex-direction: column; min-height: 0; }
 .prompt-job-output .execution-output { max-height: min(60vh, 620px); }

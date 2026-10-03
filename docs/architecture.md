@@ -56,9 +56,9 @@ The preload bridge exposes only these operation families:
 * `instructions.list`, `instructions.read`, and `instructions.write`.
 * `providers.discover`.
 * `suggestions.save` for a project-scoped suggestion markdown file.
-* `process.start`, `process.cancel`, and process event subscriptions.
+* `process.start`, `process.cancel`, `process.list`, and process event subscriptions.
 
-No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array. No IPC method accepts a writable path: `suggestions.save` receives the project and the body only, and the main process derives the storage location.
+No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array. The main process owns bounded durable job records and reconciles jobs that cannot survive an Electron restart. No IPC method accepts a writable path: `suggestions.save` receives the project and the body only, and the main process derives the storage location.
 
 ## Provider Contract
 
@@ -83,9 +83,9 @@ The initial OpenCode adapter runs the installed `models --verbose` command and f
 
 ## Feature Suggestions
 
-Prompt Studio exposes **Make a suggestion** on the task editor. It does not call a provider. `composeSuggestionPrompt` deterministically derives a feature-proposal prompt from the selected project, the selected role, the enabled goals, and a rotating angle. The role's ID, name, and tags select a discipline, which selects the example feature directions offered to the agent, so a backend role is steered toward provider adapters or service boundaries while an interface role is steered toward themes, transitions, or layout persistence. Twelve angles cycle, and each rotation reports its round number.
+Prompt Studio exposes **Make a suggestion** on the task editor. `composeSuggestionPrompt` deterministically derives a feature-proposal prompt from the selected project, the selected role, the enabled goals, and a rotating angle, then the selected provider generates the proposals. The UI discloses the provider/model and advisory network boundary before generation, while bounded output is retained in the durable job record. The role's ID, name, and tags select a discipline, which selects the example feature directions offered to the agent. Twelve angles cycle, and each rotation reports its round number.
 
-The generated prompt is displayed for review with **Another suggestion** and **Accept suggestion**. Nothing is executed automatically. Every generated prompt is persisted by the main process before it is shown, so an abandoned suggestion is still recoverable. Accepting copies the text into the task field, above any existing task text separated by a horizontal rule, and then follows the ordinary composed-prompt path: guardrails, context selection, section preview, explicit confirmation, and process execution. The suggestion is therefore task content, not a second prompt format.
+The generated provider response is shown in a markdown modal with **Another suggestion** and **Accept selected ideas**. Accepting copies only the chosen ideas into the task field; it does not open execution confirmation automatically. The task then follows the ordinary composed-prompt path: guardrails, context manifest, section preview, explicit confirmation, and process execution. The suggestion is therefore task content, not a second prompt format.
 
 ## Navigation
 

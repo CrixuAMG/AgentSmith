@@ -27,6 +27,7 @@ export interface AppConfig {
   activeProfileId: string | null;
   maxConcurrentJobs: number;
   layout: WorkspaceLayout;
+  allowedExternalPathsGlobal?: string[];
 }
 
 export interface Project {
@@ -34,6 +35,7 @@ export interface Project {
   name: string;
   path: string;
   lastOpenedAt: string;
+  allowedExternalPaths?: string[];
 }
 
 export interface Goal {
@@ -267,12 +269,36 @@ export interface PromptCompositionInput {
   gitDiff: string;
   selectedFiles: Array<{ path: string; content: string }>;
   contexts: PromptContextOptions;
+  contextPaths?: Partial<Record<keyof PromptContextOptions, string | null>>;
+}
+
+export type ContextDecision = 'allow' | 'warn' | 'confirm' | 'deny';
+
+export interface PromptContextManifestEntry {
+  id: string;
+  kind: 'file' | 'diff' | 'instruction' | 'structure' | 'git-status' | 'global' | 'provider' | 'project' | 'role' | 'goals' | 'guardrails' | 'task';
+  path: string | null;
+  included: boolean;
+  bytes: number | null;
+  chars: number | null;
+  lines: number | null;
+  decision: ContextDecision;
+  enforcement: EnforcementLayer | 'baseline' | null;
+  ruleId: string | null;
+  reason: string | null;
+}
+
+export interface PromptContextManifest {
+  version: 1;
+  entries: PromptContextManifestEntry[];
+  totals: { includedEntries: number; includedBytes: number; includedChars: number; includedLines: number };
 }
 
 export interface PromptComposition {
   text: string;
   sections: PromptSection[];
   blockedContexts: Array<{ path: string; reason: string }>;
+  contextManifest: PromptContextManifest;
 }
 
 export type SuggestionDiscipline = 'backend' | 'frontend' | 'quality' | 'architecture' | 'security' | 'general';
@@ -292,7 +318,7 @@ export interface SavedSuggestion {
   savedAt: string;
 }
 
-export type PromptHistoryStatus = 'started' | 'completed' | 'failed' | 'cancelled';
+export type PromptHistoryStatus = 'queued' | 'starting' | 'started' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
 export interface PromptHistoryEntry {
   id: string;
@@ -309,9 +335,11 @@ export interface PromptHistoryEntry {
   guardrailProfileId: string | null;
   guardrailProfileName: string | null;
   contexts?: PromptContextOptions;
+  contextManifest?: PromptContextManifest;
   command: string | null;
   status: PromptHistoryStatus;
   exitCode: number | null;
+  jobId?: string | null;
 }
 
 export interface AgentExecutionRequest {
@@ -321,6 +349,13 @@ export interface AgentExecutionRequest {
   projectPath: string;
   variant: Record<string, string | number | boolean>;
   guardrailProfile?: GuardrailProfile | null;
+  guardrailProfileId?: string | null;
+  contextManifest?: PromptContextManifest;
+  jobId?: string;
+  historyEntryId?: string | null;
+  purpose?: 'task' | 'suggestion';
+  projectId?: string | null;
+  task?: string;
 }
 
 export interface ExecutionConfiguration {
@@ -332,23 +367,34 @@ export interface ExecutionConfiguration {
 
 export interface ExecutionEvent {
   executionId: string;
-  kind: 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled';
+  kind: 'queued' | 'starting' | 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled';
   text?: string;
   exitCode?: number | null;
   providerId?: string;
   command?: string;
+  jobId?: string;
+  outputTruncated?: boolean;
 }
 
 export interface PromptJob {
   id: string;
-  projectId: string;
-  historyEntryId: string;
+  projectId: string | null;
+  historyEntryId: string | null;
   task: string;
-  state: 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled';
+  state: 'queued' | 'starting' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   executionId: string | null;
   command: string | null;
   output: Array<{ kind: 'stdout' | 'stderr' | 'system' | 'error'; text: string }>;
   exitCode: number | null;
+  providerId?: string;
+  modelId?: string | null;
+  purpose?: 'task' | 'suggestion';
+  outputBytes?: number;
+  outputTruncated?: boolean;
+  error?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  finishedAt?: string | null;
 }
 
 export interface AppSnapshot {
@@ -362,11 +408,12 @@ export interface AppSnapshot {
   globalInstructions: string;
   providerInstructions: Record<string, string>;
   promptHistory: Record<string, PromptHistoryEntry[]>;
+  promptJobs: PromptJob[];
   storageRoot: string;
   warnings: string[];
 }
 
-export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions' | 'promptHistory';
+export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions' | 'promptHistory' | 'promptJobs';
 
 export interface AgentSmithApi {
   loadSnapshot(): Promise<AppSnapshot>;
@@ -376,16 +423,17 @@ export interface AgentSmithApi {
   scanProject(project: Project, options: { showHidden: boolean }): Promise<ProjectFileNode[]>;
   readFile(project: Project, relativePath: string, guardrails: GuardrailProfile | null): Promise<FileReadResult>;
   gitStatus(project: Project): Promise<GitStatus>;
-  gitDiff(project: Project, relativePath: string, staged: boolean): Promise<string>;
+  gitDiff(project: Project, relativePath: string, staged: boolean, guardrails?: GuardrailProfile | null): Promise<string>;
   gitLog(project: Project, options: { branch?: string | null; limit: number }): Promise<GitLog>;
   gitBranches(project: Project): Promise<GitBranchList>;
   gitPush(project: Project): Promise<GitPushResult>;
   listInstructions(project: Project): Promise<InstructionFile[]>;
-  readInstruction(project: Project, relativePath: string): Promise<string>;
+  readInstruction(project: Project, relativePath: string, guardrails?: GuardrailProfile | null): Promise<string>;
   writeInstruction(project: Project, relativePath: string, content: string, overwrite: boolean): Promise<void>;
   discoverProviders(): Promise<ProviderDiscovery[]>;
   saveSuggestion(project: Project, content: string): Promise<SavedSuggestion>;
-  startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; command: string | null }>;
+  startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; jobId?: string; command: string | null }>;
   cancelProcess(executionId: string): Promise<void>;
+  listPromptJobs(): Promise<PromptJob[]>;
   onProcessEvent(callback: (event: ExecutionEvent) => void): () => void;
 }

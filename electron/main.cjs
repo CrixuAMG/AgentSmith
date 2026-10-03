@@ -5,8 +5,9 @@ const { loadSnapshot, saveResource, root: storageRoot } = require('./config-stor
 const projectService = require('./project-service.cjs');
 const { gitStatus, gitDiff, gitLog, gitBranches, gitPush } = require('./git-service.cjs');
 const { discoverProviders } = require('./provider-service.cjs');
-const { startProcess, cancelProcess, cancelAllProcesses } = require('./process-service.cjs');
+const { startProcess, cancelProcess, cancelAllProcesses, hydrateJobs, listPromptJobs } = require('./process-service.cjs');
 const { saveSuggestion } = require('./suggestion-service.cjs');
+const { buildExternalPermissions, writeOpencodeJsonc } = require('./permissions-service.cjs');
 
 let mainWindow;
 
@@ -32,7 +33,9 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const initialSnapshot = await loadSnapshot();
+  hydrateJobs(initialSnapshot.promptJobs);
   ipcMain.handle('storage:load', () => loadSnapshot());
   ipcMain.handle('storage:save', (_event, key, value) => saveResource(key, value));
   ipcMain.handle('projects:pick', async () => {
@@ -48,20 +51,45 @@ app.whenReady().then(() => {
   ipcMain.handle('projects:scan', (_event, project, options) => projectService.scanProject(project, options));
   ipcMain.handle('files:read', (_event, project, relativePath, guardrails) => projectService.readFile(project, relativePath, guardrails));
   ipcMain.handle('git:status', (_event, project) => gitStatus(project));
-  ipcMain.handle('git:diff', (_event, project, relativePath, staged) => gitDiff(project, relativePath, staged));
+  ipcMain.handle('git:diff', (_event, project, relativePath, staged, guardrails) => gitDiff(project, relativePath, staged, guardrails));
   ipcMain.handle('git:log', (_event, project, options) => gitLog(project, options || {}));
   ipcMain.handle('git:branches', (_event, project) => gitBranches(project));
   ipcMain.handle('git:push', (_event, project) => gitPush(project));
   ipcMain.handle('instructions:list', (_event, project) => projectService.listInstructions(project, path.join(storageRoot, 'instructions', 'global.md')));
-  ipcMain.handle('instructions:read', (_event, project, relativePath) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md')));
+  ipcMain.handle('instructions:read', (_event, project, relativePath, guardrails) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md'), guardrails));
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('providers:discover', () => discoverProviders());
   ipcMain.handle('suggestions:save', (_event, project, content) => saveSuggestion(path.join(storageRoot, 'suggestions'), project, content));
   ipcMain.handle('process:start', async (_event, request) => {
     const snapshot = await loadSnapshot();
-    return startProcess(request, (payload) => mainWindow?.webContents.send('process:event', payload), snapshot.config.maxConcurrentJobs);
+    let guardrailProfile = request.guardrailProfile;
+    if (request.guardrailProfileId) {
+      guardrailProfile = snapshot.guardrails.find((profile) => profile.id === request.guardrailProfileId) ?? null;
+      if (!guardrailProfile) throw new Error('The selected guardrail profile no longer exists.');
+    }
+    return startProcess({ ...request, guardrailProfile }, (payload) => mainWindow?.webContents.send('process:event', payload), snapshot.config.maxConcurrentJobs);
   });
   ipcMain.handle('process:cancel', (_event, executionId) => cancelProcess(executionId));
+  ipcMain.handle('process:list', () => listPromptJobs());
+  ipcMain.handle('permissions:sync', async (_event, { project, allowedExternalPaths = [], allowedExternalPathsGlobal = [], writeExternalRepo = true } = {}) => {
+    const asRoot = path.join(__dirname, '..');
+    // AgentSmith workspace permissions
+    try {
+      const asPerms = buildExternalPermissions([...allowedExternalPathsGlobal, ...(project?.allowedExternalPaths || [])]);
+      await writeOpencodeJsonc(asRoot, asPerms);
+    } catch (e) {
+      // ignore
+    }
+    // External repo if requested
+    if (writeExternalRepo && project?.path) {
+      try {
+        await writeOpencodeJsonc(project.path, buildExternalPermissions(project.allowedExternalPaths || allowedExternalPaths));
+      } catch (e) {
+        // ignore
+      }
+    }
+    return { ok: true };
+  });
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,7 +1,8 @@
 import { isFileReadAllowed, promptGuardrailText } from './guardrails';
-import type { PromptComposition, PromptCompositionInput, PromptSection } from './types';
+import type { PromptComposition, PromptCompositionInput, PromptContextManifestEntry, PromptContextOptions, PromptSection } from './types';
 
 const clean = (value: string): string => value.trim();
+const bytesOf = (value: string): number => new TextEncoder().encode(value).length;
 
 const section = (id: string, title: string, content: string, included = true): PromptSection => ({
   id,
@@ -65,7 +66,105 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
   sections.push(section('selected-files', 'Selected files', selectedFileContents.join('\n\n'), input.contexts.selectedFiles && selectedFileContents.length > 0));
   sections.push(section('task', 'Task', clean(input.task) || 'Describe the development task.', true));
 
+  const sourceSections = new Set([
+    'global-instructions', 'provider-instructions', 'project-instructions', 'nested-instructions',
+    'project-structure', 'readme', 'composer-json', 'package-json', 'git-status', 'git-diff', 'selected-files',
+  ]);
+  const fileSections = new Set(['project-instructions', 'nested-instructions', 'readme', 'composer-json', 'package-json', 'git-diff']);
+  const pathKeyById: Record<string, keyof PromptContextOptions> = {
+    'global-instructions': 'globalInstructions',
+    'provider-instructions': 'providerInstructions',
+    'project-instructions': 'projectInstructions',
+    'nested-instructions': 'nestedInstructions',
+    'project-structure': 'projectStructure',
+    readme: 'readme',
+    'composer-json': 'composerJson',
+    'package-json': 'packageJson',
+    'git-status': 'gitStatus',
+    'git-diff': 'gitDiff',
+  };
+  const kindFor = (id: string): PromptContextManifestEntry['kind'] => {
+    if (id === 'git-diff') return 'diff';
+    if (id.includes('instruction')) return 'instruction';
+    if (id === 'project-structure') return 'structure';
+    if (id === 'git-status') return 'git-status';
+    if (id === 'global-instructions') return 'global';
+    if (id === 'provider-instructions') return 'provider';
+    if (id === 'project') return 'project';
+    if (id === 'role') return 'role';
+    if (id === 'goals') return 'goals';
+    if (id === 'guardrails') return 'guardrails';
+    if (id === 'task') return 'task';
+    return 'file';
+  };
+  const entries: PromptContextManifestEntry[] = [];
+  for (const item of sections) {
+    const path = pathKeyById[item.id] ? input.contextPaths?.[pathKeyById[item.id]] ?? null : null;
+    let decision: PromptContextManifestEntry['decision'] = 'allow';
+    let enforcement: PromptContextManifestEntry['enforcement'] = null;
+    let ruleId: string | null = null;
+    let reason: string | null = null;
+    if (fileSections.has(item.id) && path) {
+      const permission = isFileReadAllowed(path, input.guardrails);
+      decision = permission.decision;
+      enforcement = permission.enforcement;
+      ruleId = permission.rule?.id ?? null;
+      reason = permission.reason;
+      if (decision === 'deny' && item.included) {
+        item.included = false;
+        blockedContexts.push({ path, reason: reason ?? 'Blocked by active guardrails.' });
+      }
+    }
+    if (!sourceSections.has(item.id) && item.id !== 'task' && item.id !== 'project' && item.id !== 'role' && item.id !== 'goals' && item.id !== 'guardrails') continue;
+    const content = item.content;
+    entries.push({
+      id: item.id,
+      kind: kindFor(item.id),
+      path,
+      included: item.included && Boolean(content),
+      bytes: content ? bytesOf(content) : 0,
+      chars: content.length,
+      lines: content ? content.split('\n').length : 0,
+      decision,
+      enforcement,
+      ruleId,
+      reason,
+    });
+  }
+  for (const file of input.selectedFiles) {
+    const permission = isFileReadAllowed(file.path, input.guardrails);
+    const decision = permission.decision;
+    entries.push({
+      id: `selected-file:${file.path}`,
+      kind: 'file',
+      path: file.path,
+      included: input.contexts.selectedFiles && decision !== 'deny',
+      bytes: bytesOf(file.content),
+      chars: file.content.length,
+      lines: file.content ? file.content.split('\n').length : 0,
+      decision,
+      enforcement: permission.enforcement,
+      ruleId: permission.rule?.id ?? null,
+      reason: permission.reason,
+    });
+  }
+
   const included = sections.filter((item) => item.included && item.content);
   const text = included.map((item) => `## ${item.title}\n\n${item.content}`).join('\n\n');
-  return { text, sections, blockedContexts };
+  const includedEntries = entries.filter((entry) => entry.included);
+  return {
+    text,
+    sections,
+    blockedContexts: [...new Map(blockedContexts.map((item) => [item.path, item])).values()],
+    contextManifest: {
+      version: 1,
+      entries,
+      totals: {
+        includedEntries: includedEntries.length,
+        includedBytes: includedEntries.reduce((total, entry) => total + (entry.bytes ?? 0), 0),
+        includedChars: includedEntries.reduce((total, entry) => total + (entry.chars ?? 0), 0),
+        includedLines: includedEntries.reduce((total, entry) => total + (entry.lines ?? 0), 0),
+      },
+    },
+  };
 }

@@ -3,13 +3,17 @@ const crypto = require('node:crypto');
 
 const { canonicalRoot } = require('./project-service.cjs');
 const { buildExecutionCommand, discoverProviders } = require('./provider-service.cjs');
+const { saveResource } = require('./config-store.cjs');
 
 const activeProcesses = new Map();
+const startingProcesses = new Map();
 const queuedProcesses = [];
-let startingProcesses = 0;
+const jobRecords = new Map();
 const cancellationTimers = new Map();
 const cancellationGracePeriod = 2000;
 const defaultMaxConcurrentJobs = 2;
+const maxOutputBytes = 256 * 1024;
+let persistTimer = null;
 
 function normalizeMaxConcurrentJobs(value) {
   if (!Number.isInteger(value)) return defaultMaxConcurrentJobs;
@@ -20,16 +24,107 @@ function closeProcessInput(child) {
   child.stdin?.end();
 }
 
+function now() {
+  return new Date().toISOString();
+}
+
+function persistJobs() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void saveResource('promptJobs', listPromptJobs()).catch(() => {});
+  }, 120);
+  persistTimer.unref?.();
+}
+
+function listPromptJobs() {
+  return [...jobRecords.values()]
+    .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
+    .slice(0, 100);
+}
+
+function hydrateJobs(records = []) {
+  jobRecords.clear();
+  for (const record of Array.isArray(records) ? records : []) {
+    const hydrated = { ...record, output: Array.isArray(record.output) ? record.output : [] };
+    if (['queued', 'starting', 'running'].includes(hydrated.state)) {
+      hydrated.state = 'interrupted';
+      hydrated.error = 'Execution was interrupted when AgentSmith restarted.';
+      hydrated.executionId = null;
+      hydrated.finishedAt = now();
+      hydrated.updatedAt = hydrated.finishedAt;
+    }
+    jobRecords.set(hydrated.id, hydrated);
+  }
+  persistJobs();
+}
+
+function appendOutput(record, kind, text) {
+  if (!text) return { text: '', truncated: false };
+  const remaining = maxOutputBytes - (record.outputBytes || 0);
+  if (remaining <= 0) {
+    if (!record.outputTruncated) {
+      record.outputTruncated = true;
+      return { text: '\n[AgentSmith truncated further process output after 256 KiB.]\n', truncated: true };
+    }
+    return { text: '', truncated: false };
+  }
+  const source = Buffer.from(String(text), 'utf8');
+  const accepted = source.length <= remaining ? source : source.subarray(0, remaining);
+  const acceptedText = accepted.toString('utf8');
+  record.outputBytes = (record.outputBytes || 0) + accepted.length;
+  if (accepted.length < source.length) record.outputTruncated = true;
+  record.output.push({ kind, text: acceptedText });
+  if (accepted.length < source.length) {
+    return { text: `${acceptedText}\n[AgentSmith truncated further process output after 256 KiB.]\n`, truncated: true };
+  }
+  return { text: acceptedText, truncated: false };
+}
+
+function sendEvent(record, emit, payload) {
+  const timestamp = now();
+  if (payload.kind === 'queued') record.state = 'queued';
+  if (payload.kind === 'starting') record.state = 'starting';
+  if (payload.kind === 'started') {
+    record.state = 'running';
+    record.command = payload.command ?? record.command;
+  }
+  if (payload.kind === 'stdout' || payload.kind === 'stderr') {
+    const output = appendOutput(record, payload.kind, payload.text ?? '');
+    if (!output.text) return;
+    payload = { ...payload, text: output.text, outputTruncated: output.truncated || record.outputTruncated };
+  }
+  if (payload.kind === 'completed' || payload.kind === 'failed' || payload.kind === 'cancelled') {
+    record.state = payload.kind;
+    record.exitCode = payload.exitCode ?? null;
+    record.error = payload.kind === 'failed' ? (payload.text ?? record.error ?? null) : record.error;
+    if (payload.kind === 'failed' && payload.text) record.output.push({ kind: 'error', text: payload.text });
+    record.finishedAt = timestamp;
+  }
+  record.updatedAt = timestamp;
+  persistJobs();
+  emit({ ...payload, executionId: record.executionId, jobId: record.id, providerId: record.providerId });
+}
+
 function evaluateExecutionGuardrails(request) {
   if (typeof request.prompt !== 'string' || !request.prompt.trim()) throw new Error('An execution prompt is required.');
   const denied = (request.guardrailProfile?.rules || []).find((rule) => rule.enabled
     && rule.type === 'agent_permission'
     && rule.action === 'deny'
+    && rule.enforcement !== 'prompt'
+    && rule.enforcement !== 'advisory'
     && /execute|provider process|run agent/i.test(rule.pattern));
   if (denied) throw new Error(denied.description || `Execution blocked by guardrail ${denied.id}.`);
+  const deniedContext = request.contextManifest?.entries.find((entry) => entry.included && entry.decision === 'deny');
+  if (deniedContext) throw new Error(deniedContext.reason || `Execution blocked by context guardrail ${deniedContext.ruleId || deniedContext.id}.`);
 }
 
-async function launchProcess(request, emit, executionId) {
+async function launchProcess(item) {
+  const { request, emit, executionId, record } = item;
+  if (item.cancelRequested) {
+    sendEvent(record, emit, { executionId, kind: 'cancelled', text: 'Starting execution cancelled.', exitCode: null });
+    return;
+  }
   let root;
   let discovery;
   let configuration;
@@ -38,6 +133,10 @@ async function launchProcess(request, emit, executionId) {
     root = await canonicalRoot({ path: request.projectPath });
     discovery = await discoverProviders();
     configuration = buildExecutionCommand({ ...request, projectPath: root }, discovery);
+    if (item.cancelRequested) {
+      sendEvent(record, emit, { executionId, kind: 'cancelled', text: 'Starting execution cancelled.', exitCode: null });
+      return;
+    }
     child = spawn(configuration.executable, configuration.args, {
       cwd: root,
       shell: false,
@@ -45,7 +144,7 @@ async function launchProcess(request, emit, executionId) {
       env: process.env,
     });
   } catch (error) {
-    emit({ executionId, kind: 'failed', text: error.message, exitCode: null, providerId: request.providerId });
+    sendEvent(record, emit, { executionId, kind: 'failed', text: error instanceof Error ? error.message : String(error), exitCode: null });
     return;
   }
   closeProcessInput(child);
@@ -60,30 +159,32 @@ async function launchProcess(request, emit, executionId) {
     cancellationTimers.delete(executionId);
     return true;
   };
-  emit({ executionId, kind: 'started', providerId: request.providerId, command: configuration.displayCommand });
+  sendEvent(record, emit, { executionId, kind: 'started', command: configuration.displayCommand });
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (text) => emit({ executionId, kind: 'stdout', text: String(text), providerId: request.providerId }));
-  child.stderr.on('data', (text) => emit({ executionId, kind: 'stderr', text: String(text), providerId: request.providerId }));
+  child.stdout.on('data', (text) => sendEvent(record, emit, { executionId, kind: 'stdout', text: String(text) }));
+  child.stderr.on('data', (text) => sendEvent(record, emit, { executionId, kind: 'stderr', text: String(text) }));
   child.on('error', (error) => {
     if (!clearProcess()) return;
-    emit({ executionId, kind: 'failed', text: error.message, exitCode: null, providerId: request.providerId });
+    sendEvent(record, emit, { executionId, kind: 'failed', text: error.message, exitCode: null });
     void pumpQueue();
   });
   child.on('close', (code, signal) => {
     if (!clearProcess()) return;
-    if (signal) emit({ executionId, kind: 'cancelled', text: `Process terminated with ${signal}.`, exitCode: code, providerId: request.providerId });
-    else emit({ executionId, kind: code === 0 ? 'completed' : 'failed', exitCode: code, providerId: request.providerId });
+    sendEvent(record, emit, signal
+      ? { executionId, kind: 'cancelled', text: `Process terminated with ${signal}.`, exitCode: code }
+      : { executionId, kind: code === 0 ? 'completed' : 'failed', exitCode: code });
     void pumpQueue();
   });
 }
 
 async function pumpQueue() {
-  while (queuedProcesses.length && activeProcesses.size + startingProcesses < queuedProcesses[0].limit) {
+  while (queuedProcesses.length && activeProcesses.size + startingProcesses.size < queuedProcesses[0].limit) {
     const item = queuedProcesses.shift();
-    startingProcesses += 1;
-    void launchProcess(item.request, item.emit, item.executionId).finally(() => {
-      startingProcesses -= 1;
+    startingProcesses.set(item.executionId, item);
+    sendEvent(item.record, item.emit, { executionId: item.executionId, kind: 'starting' });
+    void launchProcess(item).finally(() => {
+      startingProcesses.delete(item.executionId);
       void pumpQueue();
     });
   }
@@ -91,46 +192,77 @@ async function pumpQueue() {
 
 async function startProcess(request, emit, maxConcurrentJobs = defaultMaxConcurrentJobs) {
   evaluateExecutionGuardrails(request);
-  const limit = normalizeMaxConcurrentJobs(maxConcurrentJobs);
   const executionId = crypto.randomUUID();
-  queuedProcesses.push({ request, emit, executionId, limit });
+  const jobId = request.jobId || executionId;
+  const timestamp = now();
+  const record = {
+    id: jobId,
+    projectId: request.projectId ?? null,
+    historyEntryId: request.historyEntryId ?? null,
+    task: request.task || (request.purpose === 'suggestion' ? 'Generate provider suggestions' : 'Provider execution'),
+    state: 'queued',
+    executionId,
+    command: null,
+    output: [],
+    exitCode: null,
+    providerId: request.providerId,
+    modelId: request.modelId ?? null,
+    purpose: request.purpose || 'task',
+    outputBytes: 0,
+    outputTruncated: false,
+    error: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    finishedAt: null,
+  };
+  jobRecords.set(jobId, record);
+  const item = { request, emit, executionId, record, limit: normalizeMaxConcurrentJobs(maxConcurrentJobs), cancelRequested: false };
+  queuedProcesses.push(item);
+  sendEvent(record, emit, { executionId, kind: 'queued' });
   void pumpQueue();
-  return { executionId, command: null };
+  return { executionId, jobId, command: null };
 }
 
 async function cancelProcess(executionId) {
   const child = activeProcesses.get(executionId);
-  if (!child) {
-    const index = queuedProcesses.findIndex((item) => item.executionId === executionId);
-    if (index >= 0) {
-      const [item] = queuedProcesses.splice(index, 1);
-      item.emit({ executionId, kind: 'cancelled', text: 'Queued execution cancelled.', exitCode: null, providerId: item.request.providerId });
-    }
+  if (child) {
+    try { child.kill('SIGTERM'); } catch { return; }
+    if (cancellationTimers.has(executionId)) return;
+    const timer = setTimeout(() => {
+      if (activeProcesses.get(executionId) !== child) return;
+      try { child.kill('SIGKILL'); } catch { /* The process may have exited. */ }
+    }, cancellationGracePeriod);
+    timer.unref?.();
+    cancellationTimers.set(executionId, timer);
     return;
   }
-  try {
-    child.kill('SIGTERM');
-  } catch {
+  const starting = startingProcesses.get(executionId);
+  if (starting) {
+    starting.cancelRequested = true;
+    sendEvent(starting.record, starting.emit, { executionId, kind: 'cancelled', text: 'Starting execution cancelled.', exitCode: null });
     return;
   }
-  if (cancellationTimers.has(executionId)) return;
-  const timer = setTimeout(() => {
-    if (activeProcesses.get(executionId) !== child) return;
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // The process may have exited during the grace period.
-    }
-  }, cancellationGracePeriod);
-  timer.unref?.();
-  cancellationTimers.set(executionId, timer);
+  const index = queuedProcesses.findIndex((item) => item.executionId === executionId);
+  if (index >= 0) {
+    const [item] = queuedProcesses.splice(index, 1);
+    sendEvent(item.record, item.emit, { executionId, kind: 'cancelled', text: 'Queued execution cancelled.', exitCode: null });
+  }
 }
 
 function cancelAllProcesses() {
   for (const executionId of activeProcesses.keys()) void cancelProcess(executionId);
-  for (const item of queuedProcesses.splice(0)) {
-    item.emit({ executionId: item.executionId, kind: 'cancelled', text: 'Queued execution cancelled.', exitCode: null, providerId: item.request.providerId });
-  }
+  for (const executionId of startingProcesses.keys()) void cancelProcess(executionId);
+  for (const item of queuedProcesses.splice(0)) sendEvent(item.record, item.emit, { executionId: item.executionId, kind: 'cancelled', text: 'Queued execution cancelled.', exitCode: null });
 }
 
-module.exports = { startProcess, cancelProcess, cancelAllProcesses, evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs };
+module.exports = {
+  startProcess,
+  cancelProcess,
+  cancelAllProcesses,
+  evaluateExecutionGuardrails,
+  closeProcessInput,
+  normalizeMaxConcurrentJobs,
+  listPromptJobs,
+  hydrateJobs,
+  maxOutputBytes,
+};

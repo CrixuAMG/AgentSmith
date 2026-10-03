@@ -9,7 +9,7 @@ const configRoot = mkdtempSync(path.join(os.tmpdir(), 'agentsmith-config-'));
 process.env.AGENTSMITH_CONFIG_ROOT = configRoot;
 const require = createRequire(import.meta.url);
 const configStore = require('../../electron/config-store.cjs') as {
-  loadSnapshot: () => Promise<{ config: { theme: string; maxConcurrentJobs: number; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; storageRoot: string; warnings: string[] }>;
+  loadSnapshot: () => Promise<{ config: { theme: string; maxConcurrentJobs: number; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; promptJobs: Array<{ state: string }>; storageRoot: string; warnings: string[] }>;
   saveResource: (key: string, value: unknown) => Promise<void>;
 };
 
@@ -37,6 +37,12 @@ describe('configuration storage', () => {
        goalNames: [], contexts: { globalInstructions: true, providerInstructions: false, projectInstructions: true, nestedInstructions: false, gitStatus: true, gitDiff: false, projectStructure: true, readme: false, composerJson: false, packageJson: false, selectedFiles: false },
      }] });
     expect((await configStore.loadSnapshot()).promptHistory['project-1'][0].prompt).toBe('Inspect the project');
+    await configStore.saveResource('promptJobs', [{
+      id: 'job-1', projectId: 'project-1', historyEntryId: 'run-1', task: 'Inspect the project', state: 'completed', executionId: 'exec-1', command: 'opencode run',
+      output: [{ kind: 'stdout', text: 'done' }], exitCode: 0, providerId: 'opencode', modelId: null, purpose: 'task', outputBytes: 4, outputTruncated: false,
+      error: null, createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:01.000Z', finishedAt: '2026-10-02T00:00:01.000Z',
+    }]);
+    expect((await configStore.loadSnapshot()).promptJobs[0].state).toBe('completed');
   });
 
   it('persists a workspace layout and repairs malformed layout values in place', async () => {

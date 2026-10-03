@@ -16,4 +16,18 @@ describe('guardrail evaluation', () => {
     expect(result.allowed).toBe(false);
     expect(result.rule?.id).toBe('deny-env');
   });
+
+  it('uses the same exact glob semantics for plain patterns and baseline files', () => {
+    const rule = { ...DEFAULT_GUARDRAILS[0].rules[0], pattern: 'secret.txt' };
+    expect(matchesGuardrail(rule, 'secret.txt')).toBe(true);
+    expect(matchesGuardrail(rule, 'src/secret.txt')).toBe(false);
+    expect(isFileReadAllowed('.env.local', null).allowed).toBe(false);
+  });
+
+  it('does not treat prompt-only denial as an application read block', () => {
+    const profile = { ...DEFAULT_GUARDRAILS[0], rules: [{ ...DEFAULT_GUARDRAILS[0].rules[0], pattern: 'README.md', enforcement: 'prompt' as const }] };
+    const result = isFileReadAllowed('README.md', profile);
+    expect(result.allowed).toBe(true);
+    expect(result.decision).toBe('warn');
+  });
 });

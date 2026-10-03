@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, toRaw, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import type { AgentProfile, ProviderDiscovery, Role } from '@/shared/types';
@@ -44,6 +44,11 @@ function idFor(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+// Records come from the reactive store, and structuredClone rejects Vue proxies.
+function cloneProfile(profile: AgentProfile): AgentProfile {
+  return structuredClone(toRaw(profile));
+}
+
 async function discover() {
   discovering.value = true;
   discoveryError.value = null;
@@ -58,7 +63,7 @@ async function discover() {
 
 function selectProfile(profile: AgentProfile) {
   selectedProfileId.value = profile.id;
-  profileDraft.value = structuredClone(profile);
+  profileDraft.value = cloneProfile(profile);
   savedState.value = true;
 }
 
@@ -80,8 +85,8 @@ async function saveProfile() {
   if (!store.snapshot || !profileDraft.value || !profileDraft.value.name.trim()) return;
   profileDraft.value.name = profileDraft.value.name.trim();
   const existingIndex = store.snapshot.profiles.findIndex((profile) => profile.id === profileDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.profiles.push(structuredClone(profileDraft.value));
-  else store.snapshot.profiles[existingIndex] = structuredClone(profileDraft.value);
+  if (existingIndex === -1) store.snapshot.profiles.push(cloneProfile(profileDraft.value));
+  else store.snapshot.profiles[existingIndex] = cloneProfile(profileDraft.value);
   selectedProfileId.value = profileDraft.value.id;
   await persist('profiles', store.snapshot.profiles);
   selectProfile(store.snapshot.profiles.find((profile) => profile.id === profileDraft.value?.id)!);
@@ -103,7 +108,7 @@ async function activateProfile(profileId: string) {
 
 function selectRole(role: Role) {
   selectedRoleId.value = role.id;
-  roleDraft.value = structuredClone(role);
+  roleDraft.value = structuredClone(toRaw(role));
   savedState.value = true;
 }
 
@@ -117,8 +122,8 @@ async function saveRole() {
   if (!store.snapshot || !roleDraft.value || !roleDraft.value.name.trim()) return;
   roleDraft.value.name = roleDraft.value.name.trim();
   const existingIndex = store.snapshot.roles.findIndex((role) => role.id === roleDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.roles.push(structuredClone(roleDraft.value));
-  else store.snapshot.roles[existingIndex] = structuredClone(roleDraft.value);
+  if (existingIndex === -1) store.snapshot.roles.push(structuredClone(toRaw(roleDraft.value)));
+  else store.snapshot.roles[existingIndex] = structuredClone(toRaw(roleDraft.value));
   selectedRoleId.value = roleDraft.value.id;
   await persist('roles', store.snapshot.roles);
   selectRole(store.snapshot.roles.find((role) => role.id === roleDraft.value?.id)!);

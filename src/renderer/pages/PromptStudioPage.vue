@@ -6,9 +6,9 @@ import { composePrompt } from '@/shared/prompt-composer';
 import { renderMarkdown } from '@/shared/markdown';
 import { parseSuggestionIdeas, type ParsedSuggestionIdea } from '@/shared/suggestion-parser';
 import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
-import type { FeatureSuggestion, Model, PromptContextOptions, ProviderDiscovery, PromptHistoryEntry, Role } from '@/shared/types';
+import type { FeatureSuggestion, Model, PromptComposition, PromptContextOptions, ProviderDiscovery, PromptHistoryEntry, Role } from '@/shared/types';
 import { api, onProcessEvent } from '../services/api';
-import { activeGuardrails, addPromptJob, refreshProviders, registerPromptJobExecution, selectedProject, selectProject, store } from '../services/store';
+import { addPromptJob, refreshProviders, registerPromptJobExecution, selectedProject, selectProject, store } from '../services/store';
 import { PALETTE_EVENTS } from '../services/command-palette';
 
 const { t } = useI18n();
@@ -26,6 +26,7 @@ const selectedVariant = ref<Record<string, string | number | boolean>>({});
 const selectedSectionId = ref('contract');
 const copied = ref(false);
 const confirmationOpen = ref(false);
+const pendingComposition = ref<PromptComposition | null>(null);
 const executionId = ref<string | null>(null);
 const executionState = ref<'idle' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
 const exitCode = ref<number | null>(null);
@@ -41,7 +42,12 @@ const suggestionExecutionId = ref<string | null>(null);
 const suggestionOutput = ref('');
 const suggestionIdeas = ref<ParsedSuggestionIdea[]>([]);
 const selectedSuggestionIdeas = ref<ParsedSuggestionIdea[]>([]);
+const rewriting = ref(false);
+const rewriteExecutionId = ref<string | null>(null);
+const rewriteOutput = ref('');
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
+const maxSuggestionOutputChars = 256 * 1024;
+const maxRewriteOutputChars = 256 * 1024;
 const gitDiffSelection = ref<{ path: string; staged: boolean } | null>(null);
 const contexts = reactive<PromptContextOptions>({
   globalInstructions: true,
@@ -73,7 +79,9 @@ const selectedModel = computed(() => models.value.find((model) => model.id === s
 const modelVariants = computed(() => selectedModel.value?.variants ?? []);
 const roles = computed(() => store.snapshot?.roles.filter((role) => role.enabled) ?? []);
 const goals = computed(() => store.snapshot?.goals.filter((goal) => selectedGoalIds.value.includes(goal.id)) ?? []);
-const guardrail = computed(() => store.snapshot?.guardrails.find((profile) => profile.id === selectedGuardrailId.value) ?? activeGuardrails());
+const guardrail = computed(() => selectedGuardrailId.value
+  ? store.snapshot?.guardrails.find((profile) => profile.id === selectedGuardrailId.value) ?? null
+  : null);
 const selectedRole = computed<Role | null>(() => roles.value.find((role) => role.id === selectedRoleId.value) ?? null);
 const selectedFiles = computed(() => store.promptFiles);
 const projectStructure = computed(() => formatTree(store.tree));
@@ -251,6 +259,7 @@ function requestExecution() {
     return;
   }
   confirmationOpen.value = true;
+  pendingComposition.value = structuredClone(composition.value);
   executionState.value = 'preparing';
 }
 
@@ -259,11 +268,12 @@ async function confirmExecution() {
   confirmationOpen.value = false;
   executionState.value = 'running';
   exitCode.value = null;
+  const finalComposition = pendingComposition.value ?? composition.value;
   const entry: PromptHistoryEntry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     executedAt: new Date().toISOString(),
     task: task.value,
-    prompt: composition.value.text,
+    prompt: finalComposition.text,
     providerId: selectedProviderId.value,
     modelId: selectedModelId.value,
     variant: { ...selectedVariant.value },
@@ -274,6 +284,7 @@ async function confirmExecution() {
     guardrailProfileId: guardrail.value?.id ?? null,
     guardrailProfileName: guardrail.value?.name ?? null,
     contexts: { ...contexts },
+    contextManifest: finalComposition.contextManifest,
     command: null,
     status: 'started',
     exitCode: null,
@@ -291,7 +302,7 @@ async function confirmExecution() {
   }
   addPromptJob({ id: jobId, projectId: project.value.id, historyEntryId: entry.id, task: entry.task, state: 'queued', executionId: null, command: null, output: [{ kind: 'system', text: `${t('prompt.queued')} · ${project.value.path}` }], exitCode: null, providerId: selectedProviderId.value, modelId: selectedModelId.value, purpose: 'task' });
   try {
-    const result = await api.startProcess({ jobId, historyEntryId: entry.id, projectId: project.value.id, task: entry.task, purpose: 'task', providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: composition.value.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value, guardrailProfileId: guardrail.value?.id ?? null, contextManifest: composition.value.contextManifest });
+    const result = await api.startProcess({ jobId, historyEntryId: entry.id, projectId: project.value.id, task: entry.task, purpose: 'task', providerId: selectedProviderId.value, modelId: selectedModelId.value, prompt: finalComposition.text, projectPath: project.value.path, variant: selectedVariant.value, guardrailProfile: guardrail.value, guardrailProfileId: guardrail.value?.id ?? null, contextManifest: finalComposition.contextManifest });
     executionId.value = result.executionId;
     executionCommand.value = result.command;
     const job = store.jobs.find((item) => item.id === jobId);
@@ -330,7 +341,12 @@ function handleSuggestionEvent(event: { executionId: string; kind: string; text?
   if (!suggestionBusy.value) return;
   if (!suggestionExecutionId.value) suggestionExecutionId.value = event.executionId;
   if (event.executionId !== suggestionExecutionId.value) return;
-  if (event.kind === 'stdout' || event.kind === 'stderr') suggestionOutput.value += (event.text ?? '').replace(ansiEscapePattern, '');
+  if (event.kind === 'stdout' || event.kind === 'stderr') {
+    const nextOutput = `${suggestionOutput.value}${(event.text ?? '').replace(ansiEscapePattern, '')}`;
+    suggestionOutput.value = nextOutput.length > maxSuggestionOutputChars
+      ? `${nextOutput.slice(0, maxSuggestionOutputChars)}\n[AgentSmith truncated further suggestion output.]`
+      : nextOutput;
+  }
   if (event.kind === 'completed') void finishSuggestion();
   if (event.kind === 'failed' || event.kind === 'cancelled') {
     suggestionBusy.value = false;
@@ -339,8 +355,36 @@ function handleSuggestionEvent(event: { executionId: string; kind: string; text?
   }
 }
 
+function handleRewriteEvent(event: { executionId: string; kind: string; text?: string }) {
+  if (!rewriting.value) return;
+  if (!rewriteExecutionId.value) rewriteExecutionId.value = event.executionId;
+  if (event.executionId !== rewriteExecutionId.value) return;
+  if (event.kind === 'stdout' || event.kind === 'stderr') {
+    const nextOutput = `${rewriteOutput.value}${(event.text ?? '').replace(ansiEscapePattern, '')}`;
+    rewriteOutput.value = nextOutput.length > maxRewriteOutputChars
+      ? `${nextOutput.slice(0, maxRewriteOutputChars)}\n[AgentSmith truncated further rewrite output.]`
+      : nextOutput;
+  }
+  if (event.kind === 'completed') {
+    const rewritten = rewriteOutput.value.trim();
+    if (rewritten) {
+      task.value = rewritten;
+    }
+    rewriting.value = false;
+    rewriteExecutionId.value = null;
+    rewriteOutput.value = '';
+  }
+  if (event.kind === 'failed' || event.kind === 'cancelled') {
+    rewriting.value = false;
+    rewriteExecutionId.value = null;
+    rewriteOutput.value = '';
+    localError.value = event.text ?? t('prompt.rewriting');
+  }
+}
+
 function handleProcessEvent(event: { executionId: string; kind: string; text?: string; exitCode?: number | null }) {
   handleSuggestionEvent(event);
+  handleRewriteEvent(event);
   if (event.executionId !== executionId.value && event.kind !== 'started') return;
   if (event.kind === 'started') executionId.value = event.executionId;
   if (event.kind === 'completed') { executionState.value = 'completed'; exitCode.value = event.exitCode ?? 0; void saveHistoryEntry({ status: 'completed', exitCode: exitCode.value }); }
@@ -382,6 +426,57 @@ async function generateSuggestion() {
     suggestionAccepted.value = false;
   } catch (error) {
     suggestionBusy.value = false;
+    localError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function rewritePrompt() {
+  if (!project.value || rewriting.value) return;
+  if (!task.value.trim()) {
+    localError.value = t('prompt.noTask');
+    return;
+  }
+  if (!providerReadiness.value.ready) {
+    localError.value = providerReadiness.value.detail;
+    return;
+  }
+  rewriting.value = true;
+  localError.value = null;
+  rewriteOutput.value = '';
+  try {
+    const rewritePromptText = `Rewrite and improve the following task description. Return only the rewritten prompt text, no explanations, no extra formatting, no markdown. Preserve the intent and be clear, actionable, and precise.\n\nOriginal prompt:\n${task.value}`;
+    const rewriteJobId = `rewrite-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    addPromptJob({
+      id: rewriteJobId,
+      projectId: project.value.id,
+      historyEntryId: null,
+      task: 'Rewrite prompt',
+      state: 'queued',
+      executionId: null,
+      command: null,
+      output: [],
+      exitCode: null,
+      providerId: selectedProviderId.value,
+      modelId: selectedModelId.value,
+      purpose: 'suggestion',
+    });
+    const result = await api.startProcess({
+      jobId: rewriteJobId,
+      projectId: project.value.id,
+      task: 'Rewrite prompt',
+      purpose: 'suggestion',
+      providerId: selectedProviderId.value,
+      modelId: selectedModelId.value,
+      prompt: rewritePromptText,
+      projectPath: project.value.path,
+      variant: selectedVariant.value,
+      guardrailProfile: guardrail.value,
+      guardrailProfileId: guardrail.value?.id ?? null,
+      contextManifest: composition.value.contextManifest,
+    });
+    rewriteExecutionId.value = result.executionId;
+  } catch (error) {
+    rewriting.value = false;
     localError.value = error instanceof Error ? error.message : String(error);
   }
 }
@@ -464,7 +559,7 @@ onUnmounted(() => {
         </div>
 
         <div class="prompt-composer-area">
-          <section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section>
+          <section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="rewriting || suggestionBusy || !task.trim()" @click="rewritePrompt">{{ rewriting ? t('prompt.rewriting') : t('prompt.rewrite') }}</button><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy || rewriting" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section>
 
           <section v-if="suggestion" class="suggestion-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.suggestion') }} / {{ suggestion.angleLabel }}</span><p>{{ t('prompt.suggestionDetail') }}</p></div><span class="mono">{{ selectedSuggestionIdeas.length }}/{{ suggestionIdeas.length || '...' }}</span></div><div class="suggestion-provider-meta"><span>{{ selectedProviderId }} · {{ selectedModelId ?? t('profiles.noModel') }}</span><span>{{ t('prompt.networkAdvisory') }}</span></div><div class="suggestion-summary"><span v-if="suggestionBusy"><span class="loading-pulse"></span>{{ t('prompt.suggesting') }}</span><span v-else>{{ suggestionIdeas.length }} {{ t('prompt.suggestion') }}</span><button v-if="!suggestionBusy" class="secondary-button" type="button" @click="suggestionModalOpen = true">{{ t('prompt.openSuggestions') }}</button></div><div class="suggestion-meta"><span class="mono truncate">{{ suggestionPath ?? t('prompt.suggesting') }}</span><span v-if="suggestionAccepted" class="status-pill">{{ t('prompt.suggestionAccepted') }}</span></div><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="suggestionModalOpen = true">{{ t('prompt.openSuggestions') }}</button></div></section>
 
@@ -476,6 +571,6 @@ onUnmounted(() => {
     <section v-if="project" class="prompt-history-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.history') }}</span><p>{{ t('prompt.historyDetail') }}</p></div><span class="mono">{{ promptHistory.length.toString().padStart(2, '0') }}</span></div><div v-if="promptHistory.length" class="prompt-history-list"><details v-for="entry in promptHistory" :key="entry.id" class="prompt-history-entry"><summary><span><strong>{{ entry.task }}</strong><time class="mono" :datetime="entry.executedAt">{{ new Date(entry.executedAt).toLocaleString() }}</time></span><span class="history-status" :class="`history-${entry.status}`">{{ t(`prompt.${entry.status}`) }}</span></summary><div class="history-detail"><div class="history-settings"><span><b>{{ t('prompt.provider') }}</b>{{ historySettings(entry) }}</span><span><b>{{ t('prompt.role') }}</b>{{ entry.roleName ?? t('profiles.noRole') }}</span><span><b>{{ t('prompt.goals') }}</b>{{ entry.goalNames?.join(', ') || t('common.none') }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ entry.guardrailProfileName ?? t('profiles.noGuardrail') }}</span><span><b>{{ t('prompt.context') }}</b>{{ historyContextNames(entry) }}</span><span v-if="entry.variant && Object.keys(entry.variant).length"><b>{{ t('prompt.modelVariant') }}</b>{{ Object.entries(entry.variant).map(([key, value]) => `${key}: ${value}`).join(', ') }}</span><span v-if="entry.command"><b>{{ t('prompt.command') }}</b><code>{{ entry.command }}</code></span></div><pre>{{ entry.prompt }}</pre></div></details></div><div v-else class="history-empty">{{ t('prompt.historyEmpty') }}</div></section>
 
     <div v-if="suggestionModalOpen && suggestion" class="modal-backdrop suggestion-modal-backdrop" @click.self="suggestionModalOpen = false"><section class="suggestion-modal" role="dialog" aria-modal="true" :aria-label="t('prompt.suggestionModal')"><div class="suggestion-modal-header"><div><span class="eyebrow">{{ t('prompt.suggestionModal') }}</span><h2>{{ suggestion.title }}</h2><p>{{ selectedProviderId }} · {{ selectedModelId ?? t('profiles.noModel') }} · {{ t('prompt.networkAdvisory') }}</p></div><button class="secondary-button" type="button" @click="suggestionModalOpen = false">{{ t('prompt.closeSuggestions') }}</button></div><div v-if="suggestionBusy" class="suggestion-progress"><span class="loading-pulse"></span><span>{{ t('prompt.suggesting') }}</span></div><template v-else><div class="suggestion-modal-grid"><div class="suggestion-modal-output"><div class="eyebrow">{{ t('prompt.suggestionOutput') }}</div><div class="suggestion-markdown" v-html="suggestionHtml"></div></div><div class="suggestion-modal-selection"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.suggestion') }}</span><span class="mono">{{ selectedSuggestionIdeas.length }}/{{ suggestionIdeas.length }}</span></div><div class="suggestion-ideas"><label v-for="idea in suggestionIdeas" :key="idea.id" class="suggestion-idea"><input v-model="selectedSuggestionIdeas" type="checkbox" :value="idea"><span class="suggestion-idea-copy"><strong>{{ idea.title }}</strong><small v-if="idea.detail">{{ idea.detail }}</small></span></label></div></div></div><details class="suggestion-source"><summary>{{ t('prompt.suggestionPrompt') }}</summary><pre class="suggestion-text suggestion-prompt-text">{{ suggestion.text }}</pre></details><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="primary-button" type="button" :disabled="!selectedSuggestionIdeas.length || suggestionAccepted" @click="acceptSelectedSuggestions">{{ t('prompt.acceptSuggestion') }} <span>↗</span></button></div></template></section></div>
-    <div v-if="confirmationOpen" class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('prompt.preflight') }}</span><h2>{{ t('prompt.confirm') }}</h2><p>{{ t('prompt.confirmation') }}</p><div class="confirm-summary"><span><b>{{ t('prompt.provider') }}</b>{{ selectedProviderId }}</span><span><b>{{ t('prompt.model') }}</b>{{ selectedModelId ?? t('profiles.noModel') }}</span><span><b>{{ t('prompt.project') }}</b>{{ project?.path }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ guardrail?.name ?? t('profiles.noGuardrail') }}</span><span><b>{{ t('prompt.contextManifest') }}</b>{{ composition.contextManifest.totals.includedEntries }} bronnen · {{ composition.contextManifest.totals.includedBytes.toLocaleString() }} bytes</span></div><div class="preflight-context-list"><span v-for="entry in composition.contextManifest.entries.filter((item) => item.included)" :key="entry.id"><b>{{ entry.path ?? entry.id }}</b><small>{{ entry.decision }} · {{ entry.bytes?.toLocaleString() }} bytes</small></span></div><div v-if="composition.blockedContexts.length" class="blocked-contexts"><strong>{{ t('prompt.blocked') }}</strong><span v-for="blocked in composition.blockedContexts" :key="blocked.path">{{ blocked.path }} · {{ blocked.reason }}</span></div><div class="modal-actions"><button class="secondary-button" type="button" @click="confirmationOpen = false; executionState = 'idle'">{{ t('prompt.cancel') }}</button><button class="primary-button" type="button" @click="confirmExecution">{{ t('prompt.confirm') }} <span>↗</span></button></div></section></div>
+    <div v-if="confirmationOpen" class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('prompt.preflight') }}</span><h2>{{ t('prompt.confirm') }}</h2><p>{{ t('prompt.confirmation') }}</p><div class="confirm-summary"><span><b>{{ t('prompt.provider') }}</b>{{ selectedProviderId }}</span><span><b>{{ t('prompt.model') }}</b>{{ selectedModelId ?? t('profiles.noModel') }}</span><span><b>{{ t('prompt.project') }}</b>{{ project?.path }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ guardrail?.name ?? t('profiles.noGuardrail') }}</span><span><b>{{ t('prompt.contextManifest') }}</b>{{ composition.contextManifest.totals.includedEntries }} bronnen · {{ composition.contextManifest.totals.includedBytes.toLocaleString() }} bytes</span></div><div class="preflight-context-list"><span v-for="entry in composition.contextManifest.entries.filter((item) => item.included)" :key="entry.id"><b>{{ entry.path ?? entry.id }}</b><small>{{ entry.decision }} · {{ entry.enforcement ?? 'none' }} · {{ entry.bytes?.toLocaleString() }} bytes</small></span></div><div v-if="composition.blockedContexts.length" class="blocked-contexts"><strong>{{ t('prompt.blocked') }}</strong><span v-for="blocked in composition.blockedContexts" :key="blocked.path">{{ blocked.path }} · {{ blocked.reason }}</span></div><div class="modal-actions"><button class="secondary-button" type="button" @click="confirmationOpen = false; executionState = 'idle'">{{ t('prompt.cancel') }}</button><button class="primary-button" type="button" @click="confirmExecution">{{ t('prompt.confirm') }} <span>↗</span></button></div></section></div>
   </div>
 </template>

@@ -44,6 +44,7 @@ function snapshot() {
     globalInstructions: '',
     providerInstructions: {},
     promptHistory: {},
+    promptJobs: [],
     storageRoot: '/tmp/agentsmith',
     warnings: [],
   };
@@ -111,7 +112,7 @@ describe('prompt studio suggestions', () => {
     await flushPromises();
 
     await wrapper.find('.suggestion-ideas input').setValue(true);
-    await buttonByText(wrapper, 'Execute selected ideas')?.trigger('click');
+    await buttonByText(wrapper, 'Accept selected ideas')?.trigger('click');
     await flushPromises();
 
     const value = (textarea.element as HTMLTextAreaElement).value;
@@ -119,6 +120,7 @@ describe('prompt studio suggestions', () => {
     expect(value).toContain('Keep the existing request.');
     expect(value.indexOf(savedSuggestions[0])).toBeLessThan(value.indexOf('Keep the existing request.'));
     expect(wrapper.find('.suggestion-meta').text()).toContain('Accepted into the task');
+    expect(wrapper.find('.confirm-modal').exists()).toBe(false);
   });
 
   it('surfaces storage failures instead of showing an unsaved suggestion', async () => {

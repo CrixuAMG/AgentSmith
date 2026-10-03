@@ -108,16 +108,18 @@ function guardrailMatches(pattern, relativePath) {
 
 function readAllowed(relativePath, profile) {
   const rules = profile?.rules || [];
+  const matched = rules.find((rule) => rule.enabled
+    && rule.type === 'file_access'
+    && guardrailMatches(rule.pattern, relativePath));
+  if (matched?.action === 'deny' && (!matched.enforcement || matched.enforcement === 'application')) {
+    return { allowed: false, reason: matched.description || `Blocked by guardrail ${matched.id}.` };
+  }
   const baseline = [
     { id: 'baseline-env', pattern: '**/.env*', description: 'Environment files are never shown by the application.' },
     { id: 'baseline-private-key', pattern: '**/*.{pem,key,p12}', description: 'Private key files are never shown by the application.' },
   ];
   const baselineMatch = baseline.find((rule) => guardrailMatches(rule.pattern, relativePath));
   if (baselineMatch) return { allowed: false, reason: baselineMatch.description };
-  const matched = rules.find((rule) => rule.enabled && rule.type === 'file_access' && guardrailMatches(rule.pattern, relativePath));
-  if (matched?.action === 'deny') {
-    return { allowed: false, reason: matched.description || `Blocked by guardrail ${matched.id}.` };
-  }
   return { allowed: true, reason: null };
 }
 
@@ -256,9 +258,11 @@ async function listInstructions(project, globalPath) {
   return found.sort((left, right) => left.depth - right.depth || left.relativePath.localeCompare(right.relativePath));
 }
 
-async function readInstruction(project, relativePath, globalPath) {
+async function readInstruction(project, relativePath, globalPath, guardrails) {
   if (relativePath === globalInstructionToken) return fs.readFile(globalPath, 'utf8');
   if (!relativePath.endsWith('/AGENTS.md') && relativePath !== 'AGENTS.md') throw new Error('Only AGENTS.md instruction files can be managed.');
+  const permission = readAllowed(normalizeRelative(relativePath), guardrails);
+  if (!permission.allowed) throw new Error(permission.reason);
   const target = await safePath(project, relativePath);
   return fs.readFile(target.candidate, 'utf8');
 }
@@ -282,6 +286,7 @@ module.exports = {
   validateProject,
   scanProject,
   readFile,
+  readAllowed,
   listInstructions,
   readInstruction,
   writeInstruction,

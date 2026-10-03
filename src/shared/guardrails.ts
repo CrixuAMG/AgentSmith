@@ -1,4 +1,4 @@
-import type { GuardrailProfile, GuardrailRule } from './types';
+import type { ContextDecision, EnforcementLayer, GuardrailProfile, GuardrailRule } from './types';
 
 const expandBraces = (pattern: string): string[] => {
   const match = pattern.match(/^(.*)\{([^{}]+)\}(.*)$/);
@@ -27,29 +27,43 @@ const globToRegExp = (pattern: string): RegExp => {
   return new RegExp(`^${source}$`, 'i');
 };
 
+const BASELINE_RULES: GuardrailRule[] = [
+  { id: 'baseline-env', type: 'file_access', pattern: '**/.env*', action: 'deny', enabled: true, enforcement: 'application', description: 'Environment files are never shown by the application.' },
+  { id: 'baseline-private-key', type: 'file_access', pattern: '**/*.{pem,key,p12}', action: 'deny', enabled: true, enforcement: 'application', description: 'Private key files are never shown by the application.' },
+];
+
 export function matchesGuardrail(rule: GuardrailRule, value: string): boolean {
   if (!rule.enabled || !rule.pattern.trim()) return false;
-  if (rule.pattern.includes('*') || rule.pattern.includes('?')) {
-    const normalizedValue = value.replaceAll('\\', '/');
-    return expandBraces(rule.pattern).some((pattern) =>
-      globToRegExp(pattern).test(normalizedValue)
-      || (pattern.startsWith('**/') && globToRegExp(pattern.slice(3)).test(normalizedValue)));
-  }
-  return value.toLowerCase().includes(rule.pattern.toLowerCase());
+  const normalizedValue = value.replaceAll('\\', '/');
+  return expandBraces(rule.pattern).some((pattern) =>
+    globToRegExp(pattern).test(normalizedValue)
+    || (pattern.startsWith('**/') && globToRegExp(pattern.slice(3)).test(normalizedValue)));
+}
+
+function decisionFor(rule: GuardrailRule | null) {
+  if (!rule) return 'allow' as const;
+  if (rule.action === 'deny' && (!rule.enforcement || rule.enforcement === 'application')) return 'deny' as const;
+  if (rule.action === 'confirm') return 'confirm' as const;
+  if (rule.action === 'warn' || rule.action === 'deny') return 'warn' as const;
+  return 'allow' as const;
 }
 
 export function isFileReadAllowed(
   relativePath: string,
   profile: GuardrailProfile | null,
-): { allowed: boolean; reason: string | null; rule: GuardrailRule | null } {
-  if (!profile) return { allowed: true, reason: null, rule: null };
-  const rule = profile.rules.find((candidate) =>
-    candidate.type === 'file_access' && matchesGuardrail(candidate, relativePath));
-  if (!rule) return { allowed: true, reason: null, rule: null };
-  if (rule.action === 'deny') {
-    return { allowed: false, reason: rule.description ?? `Blocked by ${rule.id}.`, rule };
-  }
-  return { allowed: true, reason: rule.description ?? null, rule };
+): { allowed: boolean; reason: string | null; rule: GuardrailRule | null; decision: ContextDecision; enforcement: EnforcementLayer | 'baseline' | null } {
+  const rule = profile?.rules.find((candidate) =>
+    candidate.type === 'file_access' && matchesGuardrail(candidate, relativePath)) ?? null;
+  const baseline = BASELINE_RULES.find((candidate) => matchesGuardrail(candidate, relativePath)) ?? null;
+  const effectiveRule = rule && decisionFor(rule) === 'deny' ? rule : baseline ?? rule;
+  const decision = decisionFor(effectiveRule);
+  return {
+    allowed: decision !== 'deny',
+    reason: effectiveRule?.description ?? (decision === 'deny' ? `Blocked by ${effectiveRule?.id}.` : null),
+    rule: effectiveRule,
+    decision,
+    enforcement: effectiveRule?.id.startsWith('baseline-') ? 'baseline' : effectiveRule?.enforcement ?? null,
+  };
 }
 
 export function promptGuardrailText(profile: GuardrailProfile | null): string {

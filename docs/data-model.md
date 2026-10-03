@@ -15,7 +15,8 @@ All documents carry a numeric `version`. Resource files are modular so a damaged
 ├── providers/providers.json
 ├── providers/instructions.json
 ├── instructions/global.md
-├── prompts/templates.json
+├── prompts/history.json
+├── prompts/jobs.json
 ├── suggestions/<project-name>/<timestamp>.md
 └── logs/
 ```
@@ -104,6 +105,7 @@ The composer returns:
   text: string;
   sections: Array<{ id: string; title: string; content: string; included: boolean }>;
   blockedContexts: Array<{ path: string; reason: string }>;
+  contextManifest: { entries: Array<Record<string, unknown>>; totals: Record<string, number> };
 }
 ```
 
@@ -125,6 +127,10 @@ A feature suggestion is task content, not a separate prompt format:
 ```
 
 The composer is deterministic: the same project, role, goals, and rotation step always produce the same text. It reads only the project *name* — never the project path or file contents — so a suggestion file on disk records which project it concerns without spreading private paths. Once accepted, the text becomes the composed prompt's task section and is governed by the same guardrails and context toggles as any other task.
+
+## `prompts/jobs.json`
+
+Provider jobs are persisted separately from prompt history so a renderer reload can recover queued, starting, running, completed, failed, cancelled, and interrupted executions. Output is capped at 256 KiB per job and carries a truncation flag; Electron restart marks jobs that cannot be reattached as interrupted rather than falsely claiming they are still running. The job switcher exposes recent records and bounded output without persisting provider credentials or unbounded process logs.
 
 ## Migration Strategy
 

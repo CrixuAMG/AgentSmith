@@ -22,6 +22,7 @@ describe('prompt composition', () => {
       gitStatus: 'clean',
       gitDiff: '',
       selectedFiles: [],
+      contextPaths: { readme: 'README.md', packageJson: 'package.json' },
       contexts: {
         globalInstructions: true,
         providerInstructions: true,
@@ -59,6 +60,9 @@ describe('prompt composition', () => {
     expect(composition.text).toContain('## Provider instructions');
     expect(composition.text).toContain('## composer.json');
     expect(composition.text).not.toContain('## package.json');
+    expect(composition.contextManifest.entries.find((entry) => entry.id === 'readme')).toMatchObject({ included: true, path: 'README.md' });
+    expect(composition.contextManifest.entries.find((entry) => entry.id === 'package-json')).toMatchObject({ included: false, path: 'package.json' });
+    expect(composition.contextManifest.totals.includedBytes).toBeGreaterThan(0);
   });
 
   it('excludes selected files denied by the active guardrail', () => {
@@ -96,5 +100,6 @@ describe('prompt composition', () => {
 
     expect(composition.text).not.toContain('TOKEN=secret');
     expect(composition.blockedContexts).toEqual([expect.objectContaining({ path: '.env' })]);
+    expect(composition.contextManifest.entries.find((entry) => entry.path === '.env')).toMatchObject({ included: false, decision: 'deny' });
   });
 });

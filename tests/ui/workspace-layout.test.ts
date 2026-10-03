@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DE
 import { DEFAULT_WORKSPACE_LAYOUT } from '@/shared/layout';
 
 const savedConfigs: Array<Record<string, unknown>> = [];
+const workspaceInstructions = vi.hoisted(() => ({ files: [] as Array<Record<string, unknown>>, writes: [] as unknown[][] }));
 
 vi.mock('@/renderer/services/api', () => ({
   api: {
@@ -20,9 +21,9 @@ vi.mock('@/renderer/services/api', () => ({
     scanProject: async () => [],
     gitStatus: async () => ({ isRepository: true, branch: 'main', ahead: 0, behind: 0, changes: [], error: null }),
     gitDiff: async () => '',
-    listInstructions: async () => [],
-    readInstruction: async () => '',
-    writeInstruction: async () => {},
+     listInstructions: async () => workspaceInstructions.files,
+     readInstruction: async (_project: unknown, relativePath: string) => relativePath === 'AGENTS.md' ? '# Original' : '# Other',
+     writeInstruction: async (...args: unknown[]) => { workspaceInstructions.writes.push(args); },
     readFile: async () => { throw new Error('unavailable'); },
     discoverProviders: async () => [],
     saveSuggestion: async () => ({ relativePath: '', absolutePath: '', savedAt: '' }),
@@ -42,6 +43,7 @@ function snapshot() {
     globalInstructions: '',
     providerInstructions: {},
     promptHistory: {},
+    promptJobs: [],
     storageRoot: '/tmp/agentsmith',
     warnings: [],
   };
@@ -64,6 +66,11 @@ describe('workspace layout', () => {
     store.workspaceTab = 'explorer';
     store.tree = [];
     store.treeLoadedFor = null;
+    store.instructionDirty = false;
+    store.instructionDraft = '';
+    store.instructionOriginalContent = '';
+    workspaceInstructions.files = [];
+    workspaceInstructions.writes = [];
   });
 
   it('publishes layout changes as CSS custom properties', async () => {
@@ -85,6 +92,20 @@ describe('workspace layout', () => {
     expect(store.workspaceTab).toBe('git');
     expect(layout()?.tab).toBe('git');
     expect(savedConfigs.at(-1)?.layout).toEqual({ ...DEFAULT_WORKSPACE_LAYOUT, tab: 'git' });
+    wrapper.unmount();
+  });
+
+  it('requires explicit confirmation before replacing an existing instruction file', async () => {
+    workspaceInstructions.files = [{ relativePath: 'AGENTS.md', absolutePath: '/tmp/example/AGENTS.md', scope: 'project', depth: 0, readable: true }];
+    store.workspaceTab = 'instructions';
+    const wrapper = await mountWorkspace();
+    await wrapper.find('.instruction-textarea').setValue('# Changed');
+    await wrapper.find('.instruction-editor .primary-button').trigger('click');
+    expect(wrapper.find('.draft-confirm-modal').exists()).toBe(true);
+    expect(workspaceInstructions.writes).toHaveLength(0);
+    await wrapper.find('.draft-confirm-modal .primary-button').trigger('click');
+    await flushPromises();
+    expect(workspaceInstructions.writes[0]?.[3]).toBe(true);
     wrapper.unmount();
   });
 

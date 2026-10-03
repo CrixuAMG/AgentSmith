@@ -23,6 +23,7 @@ const resourceFiles = {
   providerSettings: path.join('providers', 'providers.json'),
   providerInstructions: path.join('providers', 'instructions.json'),
   promptHistory: path.join('prompts', 'history.json'),
+  promptJobs: path.join('prompts', 'jobs.json'),
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -188,12 +189,39 @@ function validPromptHistoryEntry(value) {
     && (value.contexts === undefined || (isObject(value.contexts)
       && ['globalInstructions', 'providerInstructions', 'projectInstructions', 'nestedInstructions', 'gitStatus', 'gitDiff', 'projectStructure', 'readme', 'composerJson', 'packageJson', 'selectedFiles'].every((key) => isBoolean(value.contexts[key]))))
     && (value.command === null || isString(value.command))
-    && ['started', 'completed', 'failed', 'cancelled'].includes(value.status)
+     && ['queued', 'starting', 'started', 'running', 'completed', 'failed', 'cancelled', 'interrupted'].includes(value.status)
     && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)));
 }
 
 function validPromptHistory(value) {
   return isObject(value) && Object.values(value).every((entries) => Array.isArray(entries) && entries.length <= 50 && entries.every(validPromptHistoryEntry));
+}
+
+function validPromptJob(value) {
+  return isObject(value)
+    && isString(value.id)
+    && (value.projectId === null || isString(value.projectId))
+    && (value.historyEntryId === null || isString(value.historyEntryId))
+    && isString(value.task)
+    && ['queued', 'starting', 'running', 'completed', 'failed', 'cancelled', 'interrupted'].includes(value.state)
+    && (value.executionId === null || isString(value.executionId))
+    && (value.command === null || isString(value.command))
+    && Array.isArray(value.output)
+    && value.output.every((line) => isObject(line) && ['stdout', 'stderr', 'system', 'error'].includes(line.kind) && isString(line.text))
+    && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)))
+    && (value.providerId === undefined || isString(value.providerId))
+    && (value.modelId === undefined || value.modelId === null || isString(value.modelId))
+    && (value.purpose === undefined || ['task', 'suggestion'].includes(value.purpose))
+    && (value.outputBytes === undefined || (typeof value.outputBytes === 'number' && Number.isFinite(value.outputBytes)))
+    && (value.outputTruncated === undefined || isBoolean(value.outputTruncated))
+    && (value.error === undefined || value.error === null || isString(value.error))
+    && (value.createdAt === undefined || isString(value.createdAt))
+    && (value.updatedAt === undefined || isString(value.updatedAt))
+    && (value.finishedAt === undefined || value.finishedAt === null || isString(value.finishedAt));
+}
+
+function validPromptJobs(value) {
+  return Array.isArray(value) && value.length <= 100 && value.every(validPromptJob);
 }
 
 function validDocument(value, kind) {
@@ -204,6 +232,7 @@ function validDocument(value, kind) {
   if (kind === 'providerSettings') return Array.isArray(value.providers) && value.providers.every(validProviderSetting);
   if (kind === 'providerInstructions') return validProviderInstructions(value.instructions);
   if (kind === 'promptHistory') return validPromptHistory(value.entries);
+  if (kind === 'promptJobs') return validPromptJobs(value.jobs);
   if (kind === 'goals') return validGoal(value);
   if (kind === 'roles') return validRole(value);
   if (kind === 'guardrails') return validGuardrail(value);
@@ -311,6 +340,7 @@ async function loadSnapshot() {
   const providerEnvelope = await readJson(path.join(root, resourceFiles.providerSettings), { version: 1, providers: defaultProviderSettings }, warnings, 'providerSettings');
   const providerInstructionsEnvelope = await readJson(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: {} }, warnings, 'providerInstructions');
   const promptHistoryEnvelope = await readJson(path.join(root, resourceFiles.promptHistory), { version: 1, entries: {} }, warnings, 'promptHistory');
+  const promptJobsEnvelope = await readJson(path.join(root, resourceFiles.promptJobs), { version: 1, jobs: [] }, warnings, 'promptJobs');
   const goals = await readCollection(path.join(root, 'goals'), defaultGoals, warnings);
   const roles = await readCollection(path.join(root, 'roles'), defaultRoles, warnings);
   const guardrails = await readCollection(path.join(root, 'guardrails'), defaultGuardrails, warnings);
@@ -328,6 +358,7 @@ async function loadSnapshot() {
     globalInstructions,
     providerInstructions: isObject(providerInstructionsEnvelope.instructions) ? providerInstructionsEnvelope.instructions : {},
     promptHistory: isObject(promptHistoryEnvelope.entries) ? promptHistoryEnvelope.entries : {},
+    promptJobs: Array.isArray(promptJobsEnvelope.jobs) ? promptJobsEnvelope.jobs : [],
     storageRoot: root,
     warnings,
   };
@@ -346,6 +377,7 @@ function assertValidResource(key, value) {
     providerSettings: { version: 1, providers: value },
     providerInstructions: { version: 1, instructions: value },
     promptHistory: { version: 1, entries: value },
+    promptJobs: { version: 1, jobs: value },
   };
   if (!Object.hasOwn(documents, key)) throw new Error(`Unsupported resource: ${key}`);
   const document = documents[key];
@@ -398,6 +430,12 @@ async function saveResource(key, value) {
     assertValidResource(key, value);
     const filePath = path.join(root, resourceFiles.promptHistory);
     await writeAtomic(filePath, await mergeEnvelope(filePath, { entries: clone(value) }));
+    return;
+  }
+  if (key === 'promptJobs') {
+    assertValidResource(key, value);
+    const filePath = path.join(root, resourceFiles.promptJobs);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { jobs: clone(value) }));
     return;
   }
   if (!['goals', 'roles', 'guardrails'].includes(key)) throw new Error(`Unsupported resource: ${key}`);
