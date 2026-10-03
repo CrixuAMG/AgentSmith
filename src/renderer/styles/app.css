@@ -426,6 +426,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* Prompt Studio */
 .prompt-heading { margin-bottom: 28px; }
+.prompt-job-task { max-width: 760px; overflow: hidden; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-job-settings { margin-bottom: 10px; }
+.prompt-job-output { display: flex; flex-direction: column; min-height: 0; }
+.prompt-job-output .execution-output { max-height: min(60vh, 620px); }
 .prompt-heading .primary-button { min-height: 38px; }
 .prompt-history-panel { display: grid; gap: 12px; margin-bottom: 10px; padding: 16px; border: 1px solid var(--line); background: var(--panel); }
 .prompt-history-panel .prompt-card-heading p { max-width: 520px; margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.5; }

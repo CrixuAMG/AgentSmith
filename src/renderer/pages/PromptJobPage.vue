@@ -9,6 +9,19 @@ const { t } = useI18n();
 const outputContainer = ref<HTMLElement | null>(null);
 const job = computed(() => store.jobs.find((item) => item.id === store.activeJobId) ?? null);
 const project = computed(() => job.value ? store.snapshot?.projects.find((item) => item.id === job.value?.projectId) : selectedProject());
+const historyEntry = computed(() => {
+  if (!job.value || !project.value) return null;
+  return store.snapshot?.promptHistory[project.value.id]?.find((entry) => entry.id === job.value?.historyEntryId) ?? null;
+});
+
+function contextNames() {
+  const contexts = historyEntry.value?.contexts;
+  if (!contexts) return t('prompt.historyLegacySettings');
+  return Object.entries(contexts)
+    .filter(([, enabled]) => enabled)
+    .map(([key]) => t(`prompt.contextLabels.${key}`))
+    .join(', ') || t('common.none');
+}
 
 function detach() {
   store.activeView = 'dashboard';
@@ -26,8 +39,9 @@ watch(() => job.value?.output.length, async () => {
 
 <template>
   <div v-if="job" class="prompt-page">
-    <div class="page-heading prompt-heading"><div><span class="eyebrow">{{ t('prompt.jobEyebrow') }}</span><h1>{{ job.task }}</h1><p class="lead">{{ project?.name }} · {{ t(`prompt.${job.state}`) }}</p></div><button class="secondary-button" type="button" @click="detach">{{ t('prompt.detach') }}</button></div>
-    <section class="execution-panel"><div class="execution-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ t(`prompt.${job.state}`) }}</strong></div><div class="execution-actions"><span v-if="job.command" class="mono execution-command">{{ job.command }}</span><span v-if="job.exitCode !== null" class="mono">{{ t('prompt.exitCode') }} {{ job.exitCode }}</span><button v-if="job.state === 'running'" class="danger-button" type="button" @click="cancel">{{ t('prompt.cancel') }}</button></div></div><div v-if="job.output.length" ref="outputContainer" class="execution-output"><div v-for="(line, index) in job.output" :key="`${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ line.kind === 'stderr' ? 'LOG' : line.kind === 'error' ? 'ERR' : line.kind === 'system' ? 'SYS' : 'OUT' }}</span><span>{{ line.text }}</span></div></div><div v-else class="execution-idle"><span class="empty-mark">›_</span><span>{{ t('prompt.confirmation') }}</span></div></section>
+    <div class="page-heading prompt-heading"><div><span class="eyebrow">{{ t('prompt.jobEyebrow') }}</span><h1>{{ project?.name ?? t('prompt.jobTitle') }}</h1><p class="lead prompt-job-task">{{ job.task }}</p><p class="lead">{{ t(`prompt.${job.state}`) }}</p></div><button class="secondary-button" type="button" @click="detach">{{ t('prompt.detach') }}</button></div>
+    <section v-if="historyEntry" class="prompt-job-settings prompt-section-card"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.jobSettings') }}</span><p>{{ t('prompt.jobSettingsDetail') }}</p></div></div><div class="history-settings"><span><b>{{ t('prompt.provider') }}</b>{{ historyEntry.providerId }}</span><span><b>{{ t('prompt.model') }}</b>{{ historyEntry.modelId ?? t('profiles.noModel') }}</span><span><b>{{ t('prompt.role') }}</b>{{ historyEntry.roleName ?? t('profiles.noRole') }}</span><span><b>{{ t('prompt.goals') }}</b>{{ historyEntry.goalNames?.join(', ') || t('common.none') }}</span><span><b>{{ t('prompt.guardrail') }}</b>{{ historyEntry.guardrailProfileName ?? t('profiles.noGuardrail') }}</span><span><b>{{ t('prompt.context') }}</b>{{ contextNames() }}</span><span v-if="Object.keys(historyEntry.variant).length"><b>{{ t('prompt.modelVariant') }}</b>{{ Object.entries(historyEntry.variant).map(([key, value]) => `${key}: ${value}`).join(', ') }}</span></div></section>
+    <section class="execution-panel prompt-job-output"><div class="execution-header"><div><span class="eyebrow">{{ t('prompt.output') }}</span><strong>{{ t(`prompt.${job.state}`) }}</strong></div><div class="execution-actions"><span v-if="job.command" class="mono execution-command">{{ job.command }}</span><span v-if="job.exitCode !== null" class="mono">{{ t('prompt.exitCode') }} {{ job.exitCode }}</span><button v-if="job.state === 'running'" class="danger-button" type="button" @click="cancel">{{ t('prompt.cancel') }}</button></div></div><div v-if="job.output.length" ref="outputContainer" class="execution-output"><div v-for="(line, index) in job.output" :key="`${index}-${line.text}`" class="output-line" :class="`output-${line.kind}`"><span class="mono">{{ line.kind === 'stderr' ? 'LOG' : line.kind === 'error' ? 'ERR' : line.kind === 'system' ? 'SYS' : 'OUT' }}</span><span>{{ line.text }}</span></div></div><div v-else class="execution-idle"><span class="empty-mark">›_</span><span>{{ t('prompt.confirmation') }}</span></div></section>
   </div>
   <div v-else class="empty-state"><strong>{{ t('prompt.jobUnavailable') }}</strong></div>
 </template>
