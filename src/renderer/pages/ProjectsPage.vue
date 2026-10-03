@@ -7,6 +7,7 @@ import { LAYOUT_LIMITS } from '@/shared/layout';
 import FileTreeNode from '../components/FileTreeNode.vue';
 import FileViewer from '../components/FileViewer.vue';
 import { api } from '../services/api';
+import { PALETTE_EVENTS } from '../services/command-palette';
 import { fuzzySearch, indexProjectTree, type SearchEntry } from '../services/file-search';
 import {
   activeGuardrails,
@@ -30,8 +31,9 @@ const searchCursor = ref(0);
 const busy = ref(false);
 const localError = ref<string | null>(null);
 const newInstructionPath = ref('');
-const instructionDraft = ref('');
-const instructionDirty = ref(false);
+const draftPromptOpen = ref(false);
+const draftPromptMode = ref<'switch' | 'overwrite'>('switch');
+const pendingDraftAction = ref<(() => Promise<void>) | null>(null);
 const diffLoading = ref(false);
 const treePanel = ref<HTMLElement | null>(null);
 const resizing = ref<'rail' | 'explorer' | null>(null);
@@ -89,6 +91,10 @@ async function loadWorkspace() {
 
 async function addProject() {
   localError.value = null;
+  if (store.instructionDirty) {
+    if (!window.confirm(t('instructions.discardDraftConfirm'))) return;
+    discardInstructionDraft();
+  }
   try {
     const picked = await api.pickProject();
     if (!picked) {
@@ -114,6 +120,10 @@ async function addProject() {
 async function chooseProject(projectId: string) {
   const candidate = projects.value.find((item) => item.id === projectId);
   if (!candidate) return;
+  if (store.instructionDirty) {
+    if (!window.confirm(t('instructions.discardDraftConfirm'))) return;
+    discardInstructionDraft();
+  }
   const validation = await api.validateProject(candidate);
   if (!validation.valid) {
     localError.value = validation.error ?? t('projects.invalidProject');
@@ -127,6 +137,8 @@ async function chooseProject(projectId: string) {
 
 async function removeProject(projectId: string) {
   if (!store.snapshot || !window.confirm(t('projects.removeConfirm'))) return;
+  if (store.instructionDirty && !window.confirm(t('instructions.discardDraftConfirm'))) return;
+  if (store.instructionDirty) discardInstructionDraft();
   store.snapshot.projects = store.snapshot.projects.filter((item) => item.id !== projectId);
   await persist('projects', store.snapshot.projects);
   if (store.snapshot.config.lastProjectId === projectId) await selectProject(null);
@@ -169,7 +181,7 @@ async function selectChange(change: NonNullable<typeof store.git>['changes'][num
   diffLoading.value = true;
   localError.value = null;
   try {
-    store.gitDiff = { path: change.path, staged: change.staged, content: await api.gitDiff(project.value, change.path, change.staged) };
+     store.gitDiff = { path: change.path, staged: change.staged, content: await api.gitDiff(project.value, change.path, change.staged, activeGuardrails()) };
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -183,8 +195,10 @@ async function selectInstruction(relativePath: string) {
   localError.value = null;
   try {
     store.selectedInstructionPath = relativePath;
-    instructionDraft.value = await api.readInstruction(project.value, relativePath);
-    instructionDirty.value = false;
+    store.instructionDraft = await api.readInstruction(project.value, relativePath, activeGuardrails());
+    store.instructionOriginalContent = store.instructionDraft;
+    store.instructionDraftProjectId = project.value.id;
+    store.instructionDirty = false;
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -192,16 +206,28 @@ async function selectInstruction(relativePath: string) {
   }
 }
 
-async function saveInstruction() {
-  if (!project.value || !store.selectedInstructionPath) return;
+async function saveInstruction(force = false): Promise<boolean> {
+  if (!project.value || !store.selectedInstructionPath) return false;
   try {
     const existing = store.instructions.some((item) => item.relativePath === store.selectedInstructionPath);
-    await api.writeInstruction(project.value, store.selectedInstructionPath, instructionDraft.value, existing);
-    instructionDirty.value = false;
+    if (existing && !force) {
+      draftPromptMode.value = 'overwrite';
+      draftPromptOpen.value = true;
+      return false;
+    }
+    await api.writeInstruction(project.value, store.selectedInstructionPath, store.instructionDraft, force);
+    store.instructionOriginalContent = store.instructionDraft;
+    store.instructionDirty = false;
     store.instructions = await api.listInstructions(project.value);
+    return true;
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error);
+    return false;
   }
+}
+
+function requestSaveInstruction() {
+  void saveInstruction();
 }
 
 async function createInstruction() {
@@ -209,14 +235,68 @@ async function createInstruction() {
   const relativePath = newInstructionPath.value.trim().replaceAll('\\', '/');
   if (!relativePath) return;
   const target = relativePath.endsWith('AGENTS.md') ? relativePath : `${relativePath.replace(/\/$/, '')}/AGENTS.md`;
+  if (store.instructionDirty) {
+    pendingDraftAction.value = () => createInstructionAt(target);
+    draftPromptMode.value = 'switch';
+    draftPromptOpen.value = true;
+    return;
+  }
+  await createInstructionAt(target);
+}
+
+async function createInstructionAt(target: string, force = false) {
+  if (!project.value) return;
   try {
-    await api.writeInstruction(project.value, target, '', false);
+    await api.writeInstruction(project.value, target, '', force);
     newInstructionPath.value = '';
     store.instructions = await api.listInstructions(project.value);
     await selectInstruction(target);
   } catch (error) {
+    if (!force && error instanceof Error && error.message.includes('already exists')) {
+      pendingDraftAction.value = () => createInstructionAt(target, true);
+      draftPromptMode.value = 'overwrite';
+      draftPromptOpen.value = true;
+      return;
+    }
     localError.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+function discardInstructionDraft() {
+  store.instructionDraft = store.instructionOriginalContent;
+  store.instructionDirty = false;
+}
+
+function requestInstruction(relativePath: string) {
+  if (!store.instructionDirty || relativePath === store.selectedInstructionPath) {
+    void selectInstruction(relativePath);
+    return;
+  }
+  pendingDraftAction.value = () => selectInstruction(relativePath);
+  draftPromptMode.value = 'switch';
+  draftPromptOpen.value = true;
+}
+
+async function saveDraftAndContinue() {
+  const action = pendingDraftAction.value;
+  const saved = await saveInstruction(true);
+  if (!saved) return;
+  pendingDraftAction.value = null;
+  draftPromptOpen.value = false;
+  if (action) await action();
+}
+
+async function discardDraftAndContinue() {
+  const action = pendingDraftAction.value;
+  pendingDraftAction.value = null;
+  draftPromptOpen.value = false;
+  discardInstructionDraft();
+  if (action) await action();
+}
+
+function cancelDraftPrompt() {
+  pendingDraftAction.value = null;
+  draftPromptOpen.value = false;
 }
 
 function handleSearchKeydown(event: KeyboardEvent) {
@@ -299,6 +379,7 @@ async function restoreLayout() {
 watch(search, () => { searchCursor.value = 0; });
 watch(project, () => { void loadWorkspace(); });
 onMounted(() => {
+  window.addEventListener(PALETTE_EVENTS.refreshProject, loadWorkspace);
   if (store.pendingProjectPicker) {
     store.pendingProjectPicker = false;
     void addProject();
@@ -307,6 +388,7 @@ onMounted(() => {
   if (project.value && store.treeLoadedFor !== project.value.id) void loadWorkspace();
 });
 onBeforeUnmount(() => {
+  window.removeEventListener(PALETTE_EVENTS.refreshProject, loadWorkspace);
   window.removeEventListener('pointermove', handleResize);
   window.removeEventListener('pointerup', endResize);
   window.removeEventListener('pointercancel', endResize);
@@ -375,12 +457,13 @@ onBeforeUnmount(() => {
             <div v-else class="git-changes-layout"><div class="change-list"><div v-for="[label, changes] in groupedChanges" :key="label" class="change-group"><div class="change-group-label"><span>{{ label }}</span><span class="mono">{{ changes.length.toString().padStart(2, '0') }}</span></div><button v-for="change in changes" :key="`${change.path}-${change.kind}`" class="change-item" :class="`change-${change.kind}`" type="button" @click="selectChange(change)"><span class="change-marker">{{ change.kind === 'modified' ? 'M' : change.kind === 'added' ? 'A' : change.kind === 'deleted' ? 'D' : change.kind === 'renamed' ? 'R' : change.kind === 'untracked' ? '?' : '!' }}</span><span>{{ change.path }}</span><span v-if="change.staged" class="change-state mono">{{ t('git.staged') }}</span><span v-if="change.unstaged" class="change-state mono">{{ t('git.unstaged') }}</span></button></div></div><div class="diff-panel"><div v-if="diffLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('git.loadingDiff') }}</div><pre v-else-if="store.gitDiff" class="diff-content">{{ store.gitDiff.content }}</pre><div v-else class="viewer-message"><span class="empty-mark">±</span><strong>{{ t('git.selectChange') }}</strong><span>{{ t('git.selectChangeDetail') }}</span></div></div></div>
           </div>
 
-          <div v-else class="instructions-layout">
-            <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="selectInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
-            <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !instructionDirty" @click="saveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="instructionDirty = true"></textarea><div class="editor-footer mono">{{ t('instructions.atomicNotice') }}</div></div>
+             <div v-else class="instructions-layout">
+             <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="requestInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
+              <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !store.instructionDirty" @click="requestSaveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="store.instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="store.instructionDirty = true"></textarea><div class="editor-footer mono">{{ store.instructionDirty ? t('instructions.unsaved') : t('instructions.atomicNotice') }}</div></div>
           </div>
         </template>
       </section>
-    </div>
-  </div>
+     </div>
+     <div v-if="draftPromptOpen" class="modal-backdrop"><section class="confirm-modal draft-confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('instructions.unsavedEyebrow') }}</span><h2>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteTitle') : t('instructions.unsavedTitle') }}</h2><p>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteDetail') : t('instructions.unsavedDetail') }}</p><div class="modal-actions"><button class="secondary-button" type="button" @click="cancelDraftPrompt">{{ t('common.cancel') }}</button><button v-if="draftPromptMode === 'switch'" class="danger-button" type="button" @click="discardDraftAndContinue">{{ t('instructions.discardDraft') }}</button><button class="primary-button" type="button" @click="saveDraftAndContinue">{{ t('common.save') }}</button></div></section></div>
+   </div>
 </template>

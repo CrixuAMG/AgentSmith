@@ -8,6 +8,7 @@ import type {
   InstructionFile,
   ProjectFileNode,
   PromptJob,
+  ProviderDiscovery,
   ResourceKey,
   ViewId,
   WorkspaceLayout,
@@ -36,8 +37,14 @@ export const store = reactive({
   selectedInstructionPath: null as string | null,
   selectedInstructionContent: '',
   error: null as string | null,
+  providerDiscoveries: [] as ProviderDiscovery[],
+  activeProviderId: 'opencode',
   jobs: [] as PromptJob[],
   activeJobId: null as string | null,
+  instructionDraftProjectId: null as string | null,
+  instructionDraft: '',
+  instructionOriginalContent: '',
+  instructionDirty: false,
 });
 
 const earlyProcessEvents = new Map<string, ExecutionEvent>();
@@ -45,6 +52,8 @@ let removeProcessListener: (() => void) | null = null;
 
 export async function initializeStore() {
   store.snapshot = await api.loadSnapshot();
+  store.jobs = await api.listPromptJobs();
+  store.activeJobId = store.jobs.find((job) => ['queued', 'starting', 'running'].includes(job.state))?.id ?? store.jobs[0]?.id ?? null;
   store.snapshot.config.layout = normalizeWorkspaceLayout(store.snapshot.config.layout);
   store.workspaceTab = store.snapshot.config.layout.tab;
   document.documentElement.dataset.theme = store.snapshot.config.theme;
@@ -53,6 +62,11 @@ export async function initializeStore() {
 }
 
 export function addPromptJob(job: PromptJob) {
+  const existing = store.jobs.findIndex((item) => item.id === job.id);
+  if (existing >= 0) {
+    store.jobs[existing] = job;
+    return;
+  }
   store.jobs.unshift(job);
 }
 
@@ -68,7 +82,7 @@ export function registerPromptJobExecution(jobId: string, executionId: string) {
 }
 
 function handleProcessEvent(event: ExecutionEvent) {
-  const job = store.jobs.find((item) => item.executionId === event.executionId);
+  const job = store.jobs.find((item) => item.id === event.jobId || item.executionId === event.executionId);
   if (!job) {
     if (event.kind === 'started') earlyProcessEvents.set(event.executionId, event);
     return;
@@ -77,7 +91,11 @@ function handleProcessEvent(event: ExecutionEvent) {
 }
 
 function applyProcessEvent(job: PromptJob, event: ExecutionEvent) {
-  if (event.kind === 'started') job.state = 'running';
+  if (event.kind === 'queued') job.state = 'queued';
+  if (event.kind === 'starting') job.state = 'starting';
+  if (event.kind === 'started') { job.state = 'running'; job.command = event.command ?? job.command; }
+  if (event.jobId) job.id = event.jobId;
+  if (!job.executionId) job.executionId = event.executionId;
   if (event.command) job.command = event.command;
   if (event.kind === 'stdout' || event.kind === 'stderr') job.output.push({ kind: event.kind, text: event.text ?? '' });
   if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
@@ -89,11 +107,12 @@ function applyProcessEvent(job: PromptJob, event: ExecutionEvent) {
 }
 
 async function saveJobHistory(job: PromptJob) {
-  if (!store.snapshot) return;
+  if (!store.snapshot || !job.projectId || !job.historyEntryId) return;
   const entries = store.snapshot.promptHistory[job.projectId] ?? [];
   const index = entries.findIndex((entry) => entry.id === job.historyEntryId);
   if (index < 0) return;
-  entries[index] = { ...entries[index], status: job.state === 'preparing' || job.state === 'running' ? 'started' : job.state, exitCode: job.exitCode };
+  const status = job.state === 'preparing' || job.state === 'queued' || job.state === 'starting' || job.state === 'running' ? 'running' : job.state;
+  entries[index] = { ...entries[index], status, exitCode: job.exitCode, command: job.command, jobId: job.id };
   try {
     await api.saveResource('promptHistory', store.snapshot.promptHistory);
   } catch (error) {
@@ -108,6 +127,12 @@ export async function persist(key: ResourceKey, value: unknown) {
 export async function persistConfig() {
   if (!store.snapshot) return;
   await persist('config', store.snapshot.config);
+}
+
+export async function refreshProviders() {
+  const discoveries = await api.discoverProviders();
+  store.providerDiscoveries = discoveries;
+  return discoveries;
 }
 
 export function workspaceLayout(): WorkspaceLayout | null {
@@ -178,6 +203,10 @@ export function clearWorkspace() {
   store.instructions = [];
   store.selectedInstructionPath = null;
   store.selectedInstructionContent = '';
+  store.instructionDraftProjectId = null;
+  store.instructionDraft = '';
+  store.instructionOriginalContent = '';
+  store.instructionDirty = false;
   store.error = null;
 }
 
