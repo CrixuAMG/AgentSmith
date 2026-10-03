@@ -86,7 +86,7 @@ describe('prompt studio suggestions', () => {
     expect(wrapper.find('.suggestion-panel').exists()).toBe(true);
     expect(savedSuggestions).toHaveLength(1);
     expect(wrapper.find('.suggestion-panel').text()).toContain('suggestions/Example/2026-10-02T01.md');
-    expect(wrapper.find('.suggestion-text').text()).toContain('Perspective: Senior Backend Engineer');
+    expect(wrapper.find('.suggestion-prompt-text').text()).toContain('Perspective: Senior Backend Engineer');
     expect(wrapper.find('.suggestion-ideas').text()).toContain('Add a searchable command palette');
     expect(wrapper.find('.suggestion-ideas').text()).toContain('users cannot find actions quickly.');
 
@@ -193,6 +193,8 @@ describe('prompt studio suggestions', () => {
 
     const contextSources = wrapper.find('.prompt-context-extra');
     expect(contextSources.exists()).toBe(true);
+    expect(wrapper.findAll('.task-editor')).toHaveLength(1);
+    expect(wrapper.findAll('.prompt-preview')).toHaveLength(1);
     expect(contextSources.element.closest('.prompt-page')).not.toBeNull();
     expect(wrapper.find('.task-editor').element.closest('.prompt-page')).not.toBeNull();
     expect(wrapper.find('.prompt-preview').element.closest('.prompt-page')).not.toBeNull();

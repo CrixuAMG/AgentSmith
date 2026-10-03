@@ -330,6 +330,8 @@ const messages = {
       anotherSuggestion: 'Another suggestion',
       acceptSuggestion: 'Accept suggestion',
       executeSuggestions: 'Execute selected ideas',
+      suggestionOutput: 'Provider output',
+      suggestionPrompt: 'Suggestion prompt',
       history: 'Prompt history',
       historyDetail: 'Executed requests for this project, including the settings used.',
       historyEmpty: 'No prompts have been executed for this project yet.',
