@@ -336,6 +336,7 @@ export interface ExecutionEvent {
   text?: string;
   exitCode?: number | null;
   providerId?: string;
+  command?: string;
 }
 
 export interface PromptJob {
@@ -384,7 +385,7 @@ export interface AgentSmithApi {
   writeInstruction(project: Project, relativePath: string, content: string, overwrite: boolean): Promise<void>;
   discoverProviders(): Promise<ProviderDiscovery[]>;
   saveSuggestion(project: Project, content: string): Promise<SavedSuggestion>;
-  startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; command: string }>;
+  startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; command: string | null }>;
   cancelProcess(executionId: string): Promise<void>;
   onProcessEvent(callback: (event: ExecutionEvent) => void): () => void;
 }
