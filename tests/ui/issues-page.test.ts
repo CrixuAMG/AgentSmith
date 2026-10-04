@@ -164,6 +164,21 @@ describe('issues page', () => {
     expect(wrapper.find('.global-alert').text()).toContain('#42');
   });
 
+  it('edits an existing issue through the title, body, and labels form', async () => {
+    const wrapper = await mountPage();
+    await wrapper.find('.issues-list-item').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.issues-editor input[type="text"]').setValue('Retry handling');
+    await wrapper.find('.issues-editor textarea').setValue('Updated details.');
+    await wrapper.findAll('.issues-editor input').at(1)?.setValue('bug, testing');
+    await wrapper.findAll('.issues-editor button').find((button) => button.text().includes('Save issue'))?.trigger('click');
+    await flushPromises();
+
+    expect(calls.updated).toContainEqual({ number: 42, patch: { title: 'Retry handling', body: 'Updated details.', labels: ['bug', 'testing'] } });
+    expect(wrapper.find('.global-alert').text()).toContain('updated');
+  });
+
   it('analyzes the project, lets the user review drafts, and creates the selected issue', async () => {
     const wrapper = await mountPage();
     await wrapper.findAll('button').find((button) => button.text().includes('Analyze current status'))?.trigger('click');

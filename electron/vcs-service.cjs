@@ -133,6 +133,14 @@ async function request(link, path, options = {}) {
     return { ok: false, status: 401, data: null, error: 'The repository credential was rejected. Update the token and try again.' };
   }
   if (response.status === 403) {
+    if (options.operation === 'issue-write') {
+      return {
+        ok: false,
+        status: 403,
+        data: null,
+        error: `GitHub denied issue write access. Give this token Issues: Read and write for ${repositoryLabel(link)}${detail ? ` (${detail})` : ''}.`,
+      };
+    }
     return { ok: false, status: 403, data: null, error: `The repository provider refused the request: ${detail ?? 'forbidden'}.` };
   }
   if (response.status === 404) {
@@ -228,6 +236,7 @@ async function createRepositoryIssue(project, draft) {
   const { title, body, labels } = validated.draft;
   const response = await request(link, `/repos/${link.owner}/${link.name}/issues`, {
     method: 'POST',
+    operation: 'issue-write',
     body: { title, body, ...(labels.length ? { labels } : {}) },
   });
   if (!response.ok) return { ok: false, issue: null, error: response.error };
@@ -270,7 +279,7 @@ async function updateRepositoryIssue(project, number, patch) {
     body.labels = patch.labels.filter((label) => typeof label === 'string' && label.trim()).map((label) => label.trim()).filter((label) => label.length <= 100).slice(0, MAX_LABELS);
   }
   if (!Object.keys(body).length) return { ok: false, issue: null, error: 'Nothing to change on this issue.' };
-  const response = await request(link, `/repos/${link.owner}/${link.name}/issues/${number}`, { method: 'PATCH', body });
+  const response = await request(link, `/repos/${link.owner}/${link.name}/issues/${number}`, { method: 'PATCH', operation: 'issue-write', body });
   if (!response.ok) return { ok: false, issue: null, error: response.error };
   const issue = toIssue(response.data);
   if (!issue) return { ok: false, issue: null, error: 'The repository provider returned an unreadable issue.' };

@@ -121,6 +121,49 @@ describe('issue reads and writes', () => {
     }
   });
 
+  it('patches title, body, and labels through the GitHub issue endpoint', async () => {
+    const originalFetch = global.fetch;
+    vcs.setVcsCredential('github', 'ghp_testvalue');
+    global.fetch = async (input, init) => {
+      expect(String(input)).toBe('https://api.github.com/repos/example/agent/issues/43');
+      expect(init?.method).toBe('PATCH');
+      expect(JSON.parse(String(init?.body))).toEqual({ title: 'Retry handling', body: 'Updated details.', labels: ['bug', 'testing'] });
+      return new Response(JSON.stringify({
+        number: 43,
+        title: 'Retry handling',
+        body: 'Updated details.',
+        state: 'open',
+        html_url: 'https://github.com/example/agent/issues/43',
+        user: { login: 'octocat' },
+        labels: [{ name: 'bug' }, { name: 'testing' }],
+        comments: 0,
+        created_at: '2026-10-04T00:00:00.000Z',
+        updated_at: '2026-10-04T00:01:00.000Z',
+      }), { status: 200 });
+    };
+    try {
+      const result = await vcs.updateRepositoryIssue(project, 43, { title: 'Retry handling', body: 'Updated details.', labels: ['bug', 'testing'] });
+      expect(result).toMatchObject({ ok: true, issue: { number: 43, title: 'Retry handling', labels: ['bug', 'testing'] }, error: null });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('turns a GitHub write permission response into an actionable error', async () => {
+    const originalFetch = global.fetch;
+    vcs.setVcsCredential('github', 'ghp_testvalue');
+    global.fetch = async () => new Response(JSON.stringify({ message: 'Resource not accessible by personal access token' }), { status: 403 });
+    try {
+      const result = await vcs.createRepositoryIssue(project, { title: 'A test issue', body: 'Body', labels: [] });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Issues: Read and write');
+      expect(result.error).toContain('example/agent');
+      expect(result.error).not.toContain('ghp_testvalue');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('rejects an issue patch that reaches outside an issue', async () => {
     expect(await vcs.updateRepositoryIssue(project, 1, { merge: true })).toMatchObject({ ok: false, issue: null });
     expect((await vcs.updateRepositoryIssue(project, 1, { merged: true })).error).toContain('merged');
