@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -15,6 +15,7 @@ const vcs = require('../../electron/vcs-service.cjs') as {
   configureCredentialStorage: (storage: unknown) => void;
   loadStoredVcsCredential: () => Promise<boolean>;
   persistVcsCredential: (providerId: string, token: string | null, remember: boolean) => Promise<{ persisted: boolean }>;
+  verifyVcsCredential: (providerId: string) => Promise<{ verified: boolean; account: string | null; error: string | null }>;
   updateRepositoryIssue: (project: unknown, number: number, patch: unknown) => Promise<{ ok: boolean; error: string | null }>;
   validateDraft: (draft: unknown) => { error: string | null; draft?: { title: string; labels: string[] } };
 };
@@ -47,7 +48,6 @@ describe('repository provider base URLs', () => {
 
 describe('session credentials', () => {
   it('reports only whether a credential exists and never returns the token', () => {
-    delete process.env.AGENTSMITH_GITHUB_TOKEN;
     expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: false, source: 'none' });
 
     const state = vcs.setVcsCredential('github', 'ghp_sessionvalue');
@@ -61,8 +61,13 @@ describe('session credentials', () => {
     expect(vcs.setVcsCredential('github', '   ')).toEqual({ providerId: 'github', configured: false, source: 'none' });
   });
 
-  it('describes provider capability without contacting the provider when unconfigured', async () => {
+  it('does not read a credential from the environment', () => {
+    process.env.AGENTSMITH_GITHUB_TOKEN = 'ghp_environmentvalue';
+    expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: false, source: 'none' });
     delete process.env.AGENTSMITH_GITHUB_TOKEN;
+  });
+
+  it('describes provider capability without contacting the provider when unconfigured', async () => {
     const [discovery] = await vcs.discoverVcsProviders();
 
     expect(discovery.installation.providerId).toBe('github');
@@ -72,14 +77,36 @@ describe('session credentials', () => {
     expect(discovery.capabilities).toEqual({ supportsIssues: true, supportsBranches: true, supportsPullRequests: true, supportsMerge: false });
   });
 
-  it('reads a credential from the environment without persisting it', () => {
-    process.env.AGENTSMITH_GITHUB_TOKEN = 'ghp_environmentvalue';
-    expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: true, source: 'environment' });
-    delete process.env.AGENTSMITH_GITHUB_TOKEN;
+  it('verifies a token with the provider before it is trusted, without echoing it', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (input) => {
+      expect(String(input)).toBe('https://api.github.com/user');
+      return new Response(JSON.stringify({ login: 'octocat' }), { status: 200 });
+    };
+    try {
+      vcs.setVcsCredential('github', 'ghp_verifyvalue');
+      const verification = await vcs.verifyVcsCredential('github');
+      expect(verification).toEqual({ verified: true, account: 'octocat', error: null });
+      expect(JSON.stringify(verification)).not.toContain('ghp_verifyvalue');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('reports a rejected token without keeping it configured', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => new Response(JSON.stringify({ message: 'Bad credentials' }), { status: 401 });
+    try {
+      vcs.setVcsCredential('github', 'ghp_wrongvalue');
+      const verification = await vcs.verifyVcsCredential('github');
+      expect(verification.verified).toBe(false);
+      expect(verification.error).toMatch(/rejected/i);
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('persists only an encrypted credential and restores it after restart', async () => {
-    delete process.env.AGENTSMITH_GITHUB_TOKEN;
     const root = await mkdtemp(path.join(os.tmpdir(), 'agentsmith-vcs-'));
     const filePath = path.join(root, 'vcs', 'github-credential.json');
     vcs.configureCredentialStorage({
@@ -93,12 +120,55 @@ describe('session credentials', () => {
       expect(await vcs.persistVcsCredential('github', 'ghp_persistedvalue', true)).toEqual({ persisted: true });
       const saved = await readFile(filePath, 'utf8');
       expect(saved).not.toContain('ghp_persistedvalue');
+      expect(JSON.parse(saved)).toEqual({ version: 1, providerId: 'github', encryptedToken: Buffer.from('sealed:ghp_persistedvalue').toString('base64') });
+      expect((await stat(filePath)).mode & 0o777).toBe(0o600);
 
       vcs.setVcsCredential('github', null);
       expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: false, source: 'none' });
       expect(await vcs.loadStoredVcsCredential()).toBe(true);
       expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: true, source: 'stored' });
       expect(await vcs.persistVcsCredential('github', null, false)).toEqual({ persisted: false });
+      await expect(readFile(filePath, 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the credential in the session when secure storage is unavailable', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agentsmith-vcs-'));
+    const filePath = path.join(root, 'vcs', 'github-credential.json');
+    vcs.configureCredentialStorage({
+      filePath,
+      encryptionAvailable: false,
+      encrypt: (token: string) => Buffer.from(token),
+      decrypt: (value: Buffer) => value.toString(),
+    });
+    try {
+      vcs.setVcsCredential('github', 'ghp_sessionvalue');
+      expect(await vcs.persistVcsCredential('github', 'ghp_sessionvalue', true)).toEqual({ persisted: false });
+      expect(await vcs.loadStoredVcsCredential()).toBe(false);
+      expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: true, source: 'session' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores a malformed or foreign credential file instead of failing', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agentsmith-vcs-'));
+    const filePath = path.join(root, 'vcs', 'github-credential.json');
+    vcs.configureCredentialStorage({
+      filePath,
+      encryptionAvailable: true,
+      encrypt: (token: string) => Buffer.from(`sealed:${token}`),
+      decrypt: () => 'ghp_malformedvalue',
+    });
+    try {
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, '{ not json', 'utf8');
+      expect(await vcs.loadStoredVcsCredential()).toBe(false);
+      await writeFile(filePath, JSON.stringify({ version: 1, providerId: 'gitlab', encryptedToken: 'x' }), 'utf8');
+      expect(await vcs.loadStoredVcsCredential()).toBe(false);
+      expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: false, source: 'none' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

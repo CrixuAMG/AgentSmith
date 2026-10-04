@@ -5,6 +5,8 @@
  *
  * 1. Credentials live in main-process memory. A remembered GitHub credential is stored
  *    only as an OS-encrypted blob; raw tokens never appear in a result, message, or log.
+ *    There is one flow: the user pastes a personal access token, which is verified before
+ *    it is remembered. Nothing is read from the environment.
  * 2. Merging does not exist here. There is no merge request, no merge endpoint, and no
  *    way for configuration to authorize one; closing a pull request is the only pull
  *    request transition offered.
@@ -18,6 +20,10 @@ const MAX_LABELS = 20;
 const ISSUE_STATE_FILTERS = new Set(['open', 'closed', 'all']);
 const PATCHABLE_FIELDS = new Set(['title', 'body', 'state', 'labels']);
 const CREDENTIAL_PROVIDERS = new Set(['github', 'gitlab']);
+const PERSISTED_PROVIDERS = new Set(['github']);
+
+const fs = require('node:fs/promises');
+const nodePath = require('node:path');
 
 /** providerId -> token, held in memory for the lifetime of the process only. */
 const sessionCredentials = new Map();
@@ -32,15 +38,14 @@ function messageOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Resolves the active credential: what the user pasted for this run first, then the
+ * remembered credential loaded from encrypted storage at startup. There is no
+ * environment fallback; the Issues page is the single entry point.
+ */
 function credentialFor(providerId) {
   const session = sessionCredentials.get(providerId);
   if (session) return { token: session, source: 'session' };
-  if (providerId === 'github' && process.env.AGENTSMITH_GITHUB_TOKEN?.trim()) {
-    return { token: process.env.AGENTSMITH_GITHUB_TOKEN.trim(), source: 'environment' };
-  }
-  if (providerId === 'gitlab' && process.env.AGENTSMITH_GITLAB_TOKEN?.trim()) {
-    return { token: process.env.AGENTSMITH_GITLAB_TOKEN.trim(), source: 'environment' };
-  }
   const stored = storedCredentials.get(providerId);
   if (stored) return { token: stored, source: 'stored' };
   return { token: null, source: 'none' };
@@ -51,16 +56,25 @@ function credentialState(providerId) {
   return { providerId, configured: Boolean(token), source: token ? source : 'none' };
 }
 
+/**
+ * Installs the encrypted-credential backend. It receives the file location plus the
+ * host's `safeStorage` encrypt/decrypt pair; the service never knows the raw paths of
+ * anything except that single credential file.
+ */
 function configureCredentialStorage(storage) {
   credentialStorage = storage && typeof storage === 'object' ? storage : null;
 }
 
+/**
+ * Restores a remembered credential at startup. A missing, malformed, or undecryptable
+ * file is treated as "not connected" instead of blocking launch.
+ */
 async function loadStoredVcsCredential() {
   storedCredentials.clear();
-  if (!credentialStorage?.encryptionAvailable) return false;
+  if (!credentialStorage?.encryptionAvailable || typeof credentialStorage.decrypt !== 'function') return false;
   let parsed;
   try {
-    parsed = JSON.parse(await require('node:fs/promises').readFile(credentialStorage.filePath, 'utf8'));
+    parsed = JSON.parse(await fs.readFile(credentialStorage.filePath, 'utf8'));
     if (parsed?.version !== 1 || parsed.providerId !== 'github' || typeof parsed.encryptedToken !== 'string') return false;
     const token = credentialStorage.decrypt(Buffer.from(parsed.encryptedToken, 'base64'));
     if (typeof token !== 'string' || !token.trim()) return false;
@@ -71,16 +85,20 @@ async function loadStoredVcsCredential() {
   }
 }
 
+/**
+ * Stores the credential as an OS-encrypted blob, or removes any stored credential when
+ * the user declines to remember it or forgets it. Only an encrypted token reaches disk,
+ * written to a private directory and replaced atomically.
+ */
 async function persistVcsCredential(providerId, token, remember) {
   storedCredentials.delete(providerId);
-  if (!credentialStorage?.encryptionAvailable || !remember || typeof token !== 'string' || !token.trim()) {
-    if (credentialStorage?.filePath) await require('node:fs/promises').unlink(credentialStorage.filePath).catch(() => {});
+  const canPersist = PERSISTED_PROVIDERS.has(providerId) && credentialStorage?.encryptionAvailable && typeof credentialStorage.encrypt === 'function';
+  if (!canPersist || !remember || typeof token !== 'string' || !token.trim()) {
+    if (credentialStorage?.filePath) await fs.unlink(credentialStorage.filePath).catch(() => {});
     return { persisted: false };
   }
-  const fs = require('node:fs/promises');
-  const path = require('node:path');
   const encryptedToken = credentialStorage.encrypt(token.trim());
-  await fs.mkdir(path.dirname(credentialStorage.filePath), { recursive: true, mode: 0o700 });
+  await fs.mkdir(nodePath.dirname(credentialStorage.filePath), { recursive: true, mode: 0o700 });
   const temporary = `${credentialStorage.filePath}.tmp-${process.pid}-${Date.now()}`;
   const document = JSON.stringify({ version: 1, providerId, encryptedToken: encryptedToken.toString('base64') });
   try {
@@ -92,6 +110,19 @@ async function persistVcsCredential(providerId, token, remember) {
   }
   storedCredentials.set(providerId, token.trim());
   return { persisted: true };
+}
+
+/**
+ * Confirms with the provider that the active credential is usable before it is
+ * remembered. Returns the account name, never the token, and never writes anything.
+ */
+async function verifyVcsCredential(providerId) {
+  const { token } = credentialFor(providerId);
+  if (!token) return { verified: false, account: null, error: 'No token is configured.' };
+  if (providerId !== 'github') return { verified: false, account: null, error: `The provider ${String(providerId)} cannot verify a credential yet.` };
+  const response = await request({ providerId: 'github', host: 'github.com', owner: '', name: '', defaultBranch: '' }, '/user');
+  if (!response.ok) return { verified: false, account: null, error: response.error };
+  return { verified: true, account: typeof response.data?.login === 'string' ? response.data.login : null, error: null };
 }
 
 /**
@@ -146,7 +177,7 @@ function linkedRepository(project) {
 async function request(link, path, options = {}) {
   const { token, source } = credentialFor(link.providerId);
   if (!token) {
-    return { ok: false, status: null, data: null, error: `No ${link.providerId} credential is configured for this session.` };
+    return { ok: false, status: null, data: null, error: `No ${link.providerId} credential is configured.` };
   }
   const headers = {
     accept: 'application/vnd.github+json',
@@ -223,7 +254,7 @@ async function detectGitHub() {
       installation: { providerId: 'github', connected: false, account: null, error: null },
       capabilities: providerCapabilities.github,
       credential,
-      note: 'Add a GitHub personal access token with repository permissions for this session, or set AGENTSMITH_GITHUB_TOKEN.',
+      note: 'Enter a GitHub personal access token with Issues: Read and write. AgentSmith verifies it with GitHub before it is remembered.',
     };
   }
   const response = await request(link, '/user');
@@ -344,6 +375,7 @@ module.exports = {
   configureCredentialStorage,
   loadStoredVcsCredential,
   persistVcsCredential,
+  verifyVcsCredential,
   updateRepositoryIssue,
   validateDraft,
 };

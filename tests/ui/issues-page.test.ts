@@ -9,8 +9,9 @@ import { store } from '@/renderer/services/store';
 import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 import type { RepositoryIssue, RepositoryLink } from '@/shared/types';
 
-const calls: { credentials: Array<string | null>; created: unknown[]; updated: Array<{ number: number; patch: unknown }> } = {
+const calls: { credentials: Array<{ token: string; remember: boolean }>; cleared: number; created: unknown[]; updated: Array<{ number: number; patch: unknown }> } = {
   credentials: [],
+  cleared: 0,
   created: [],
   updated: [],
 };
@@ -41,9 +42,13 @@ vi.mock('@/renderer/services/api', () => ({
       credential: { providerId: 'github', configured: true, source: 'session' },
       note: 'Merging is not offered by AgentSmith, regardless of the credential scope.',
     }],
-    setVcsCredential: async (_providerId: string, token: string | null) => {
-      calls.credentials.push(token);
-      return { providerId: 'github', configured: Boolean(token), source: token ? 'session' : 'none' };
+    setVcsCredential: async (_providerId: string, token: string, remember = false) => {
+      calls.credentials.push({ token, remember });
+      return { providerId: 'github', configured: Boolean(token), source: remember ? 'stored' : 'session', persisted: remember };
+    },
+    clearVcsCredential: async () => {
+      calls.cleared += 1;
+      return { providerId: 'github', configured: false, source: 'none' };
     },
     gitRemote: async () => (linked
       ? { remote: 'origin', link: { providerId: 'github', host: 'github.com', owner: 'example', name: 'agent', defaultBranch: 'main' }, error: null }
@@ -112,6 +117,7 @@ async function mountPage() {
 describe('issues page', () => {
   beforeEach(() => {
     calls.credentials.length = 0;
+    calls.cleared = 0;
     calls.created.length = 0;
     calls.updated.length = 0;
     linked = true;
@@ -133,6 +139,25 @@ describe('issues page', () => {
     expect(permissions).toContain('allowed');
     expect(permissions).toContain('never allowed');
     expect(permissions).not.toMatch(/Merge a pull request\s*✓/);
+  });
+
+  it('uses one token field, remembers it when asked, and forgets it on disconnect', async () => {
+    const wrapper = await mountPage();
+    const credential = wrapper.findAll('.prompt-card')[1];
+
+    expect(credential.text()).toContain('/tmp/agentsmith/vcs/github-credential.json');
+    expect(credential.text()).not.toMatch(/Authorize AgentSmith/);
+
+    await credential.find('input[type="password"]').setValue('github_pat_example');
+    await credential.findAll('button').find((button) => button.text().includes('Connect GitHub'))?.trigger('click');
+    await flushPromises();
+
+    expect(calls.credentials).toEqual([{ token: 'github_pat_example', remember: true }]);
+    expect(credential.text()).toContain('stored encrypted');
+
+    await credential.findAll('button').find((button) => button.text().includes('Forget saved token'))?.trigger('click');
+    await flushPromises();
+    expect(calls.cleared).toBe(1);
   });
 
   it('hands a generated prompt to Prompt Studio', async () => {

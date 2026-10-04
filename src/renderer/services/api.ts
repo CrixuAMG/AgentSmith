@@ -118,7 +118,10 @@ function browserApi(): AgentSmithApi {
     async discoverVcsProviders(): Promise<VcsProviderDiscovery[]> {
       return [];
     },
-    async setVcsCredential(_providerId: VcsProviderId, _token: string | null, _remember = false): Promise<VcsCredentialState> {
+    async setVcsCredential(_providerId: VcsProviderId, _token: string, _remember = false): Promise<VcsCredentialState> {
+      throw new Error('Repository credentials require the desktop application.');
+    },
+    async clearVcsCredential(_providerId: VcsProviderId): Promise<VcsCredentialState> {
       throw new Error('Repository credentials require the desktop application.');
     },
     async listRepositoryIssues(_project: Project, _options: { state: 'open' | 'closed' | 'all' }): Promise<IssueListResult> {

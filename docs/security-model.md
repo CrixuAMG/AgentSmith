@@ -46,7 +46,8 @@ The user-selected project is untrusted input. Project files, Git output, provide
 
 ## Hosted Repository Rules
 
-* GitHub credentials are accepted only by the main-process VCS service. A remembered token is encrypted with Electron `safeStorage` and stored at `vcs/github-credential.json`; it is never returned through IPC.
+* GitHub credentials are accepted only by the main-process VCS service. A pasted token is verified with the provider before it is accepted; a rejected token is discarded. A remembered token is encrypted with Electron `safeStorage` and stored at `vcs/github-credential.json` with directory mode `0700` and file mode `0600`; it is never returned through IPC.
+* No repository credential is read from the environment. `AGENTSMITH_GITHUB_TOKEN` and `AGENTSMITH_GITLAB_TOKEN` are still removed from every AI provider child process.
 * `AGENTSMITH_GITHUB_TOKEN` is available to the VCS service but is removed from the environment of every AI provider child process.
 * Repository links are derived from the local Git remote and validated again at the IPC boundary. GitHub issue paths, titles, bodies, labels, and issue states use explicit bounds and allowlists.
 * Provider issue analysis is untrusted output. It must parse as a bounded JSON issue list; prose, malformed objects, duplicate titles, and oversized fields are rejected or skipped before a write.

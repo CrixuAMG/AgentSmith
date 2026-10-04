@@ -19,6 +19,7 @@ const api = {
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   discoverVcsProviders: () => ipcRenderer.invoke('vcs:discover'),
   setVcsCredential: (providerId, token, remember) => ipcRenderer.invoke('vcs:credential', providerId, token, remember),
+  clearVcsCredential: (providerId) => ipcRenderer.invoke('vcs:credential:clear', providerId),
   listRepositoryIssues: (project, options) => ipcRenderer.invoke('vcs:issues:list', project, options),
   createRepositoryIssue: (project, draft) => ipcRenderer.invoke('vcs:issues:create', project, draft),
   updateRepositoryIssue: (project, number, patch) => ipcRenderer.invoke('vcs:issues:update', project, number, patch),

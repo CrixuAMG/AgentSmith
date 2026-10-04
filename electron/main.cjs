@@ -14,6 +14,7 @@ const {
   configureCredentialStorage,
   loadStoredVcsCredential,
   persistVcsCredential,
+  verifyVcsCredential,
 } = require('./vcs-service.cjs');
 const { startProcess, cancelProcess, cancelAllProcesses, hydrateJobs, listPromptJobs } = require('./process-service.cjs');
 const { saveSuggestion } = require('./suggestion-service.cjs');
@@ -77,13 +78,25 @@ app.whenReady().then(async () => {
   ipcMain.handle('instructions:read', (_event, project, relativePath, guardrails) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md'), guardrails));
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('providers:discover', () => discoverProviders());
-  // Repository credentials are accepted here. The optional remembered credential is
-  // encrypted by Electron's OS-backed safeStorage and never enters the renderer.
+  // Repository credentials are accepted here and never leave the main process. A token is
+  // verified with the provider before it may be remembered; a remembered credential is
+  // encrypted by Electron's OS-backed safeStorage at vcs/github-credential.json.
   ipcMain.handle('vcs:discover', () => discoverVcsProviders());
   ipcMain.handle('vcs:credential', async (_event, providerId, token, remember = false) => {
+    if (typeof token !== 'string' || !token.trim()) throw new Error('Enter a GitHub personal access token first.');
     const state = setVcsCredential(providerId, token);
+    const verification = await verifyVcsCredential(providerId);
+    if (!verification.verified) {
+      setVcsCredential(providerId, null);
+      throw new Error(verification.error);
+    }
     const persistence = await persistVcsCredential(providerId, token, Boolean(remember));
     return { ...state, persisted: persistence.persisted };
+  });
+  ipcMain.handle('vcs:credential:clear', async (_event, providerId) => {
+    const state = setVcsCredential(providerId, null);
+    await persistVcsCredential(providerId, null, false);
+    return state;
   });
   ipcMain.handle('vcs:issues:list', (_event, project, options) => listRepositoryIssues(project, options || {}));
   ipcMain.handle('vcs:issues:create', (_event, project, draft) => createRepositoryIssue(project, draft));
