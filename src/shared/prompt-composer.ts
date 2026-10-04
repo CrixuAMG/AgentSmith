@@ -17,7 +17,7 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
     section(
       'contract',
       'Operating contract',
-      'You are working as a careful software engineering agent. Inspect existing context before changing anything. Keep changes focused, explain assumptions, and report verification honestly.',
+      'You are working as a careful software engineering agent. Inspect existing context before changing anything. Keep changes focused, explain assumptions, and report verification honestly. When temporary files are needed, use .AgentSmith/tmp inside the selected project root and do not use the host system temporary directory.',
     ),
     section('global-instructions', 'Global instructions', input.globalInstructions, input.contexts.globalInstructions && Boolean(clean(input.globalInstructions))),
     section('provider-instructions', 'Provider instructions', input.providerInstructions, input.contexts.providerInstructions && Boolean(clean(input.providerInstructions))),

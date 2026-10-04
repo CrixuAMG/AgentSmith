@@ -1,5 +1,7 @@
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 
 const { canonicalRoot } = require('./project-service.cjs');
 const { buildExecutionCommand, discoverProviders } = require('./provider-service.cjs');
@@ -29,6 +31,42 @@ function closeProcessInput(child) {
 
 function providerEnvironment(environment = process.env) {
   return Object.fromEntries(Object.entries(environment).filter(([key]) => !/^AGENTSMITH_(?:GITHUB|GITLAB)_TOKEN$/.test(key)));
+}
+
+const isWithin = (root, candidate) => candidate === root || candidate.startsWith(`${root}${path.sep}`);
+
+async function existingDirectory(directory, label) {
+  try {
+    const stat = await fs.lstat(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`The AgentSmith ${label} directory is not a safe directory.`);
+  } catch (error) {
+    if (!(error instanceof Error && error.code === 'ENOENT')) throw error;
+    await fs.mkdir(directory, { mode: 0o700 });
+  }
+  await fs.chmod(directory, 0o700);
+  return fs.realpath(directory);
+}
+
+/** Creates a private, per-run temp directory inside the selected project. */
+async function ensureProviderTempDirectory(projectRoot, executionId) {
+  const root = await fs.realpath(projectRoot);
+  const agentRoot = await existingDirectory(path.join(root, '.AgentSmith'), 'workspace');
+  if (!isWithin(root, agentRoot)) throw new Error('The AgentSmith workspace resolves outside the project root.');
+  const tempRoot = await existingDirectory(path.join(agentRoot, 'tmp'), 'temporary');
+  if (!isWithin(agentRoot, tempRoot)) throw new Error('The AgentSmith temporary directory resolves outside the project.');
+  const runDirectory = path.join(tempRoot, executionId);
+  await fs.mkdir(runDirectory, { mode: 0o700 });
+  await fs.chmod(runDirectory, 0o700);
+  const resolvedRunDirectory = await fs.realpath(runDirectory);
+  if (!isWithin(tempRoot, resolvedRunDirectory)) {
+    await fs.rm(runDirectory, { recursive: true, force: true }).catch(() => {});
+    throw new Error('The provider temporary directory resolves outside the project.');
+  }
+  return resolvedRunDirectory;
+}
+
+async function cleanupProviderTempDirectory(directory) {
+  if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
 }
 
 function stripAnsi(value) {
@@ -147,11 +185,14 @@ async function launchProcess(item) {
   let discovery;
   let configuration;
   let child;
+  let temporaryDirectory = null;
   try {
     root = await canonicalRoot({ path: request.projectPath });
+    temporaryDirectory = await ensureProviderTempDirectory(root, executionId);
     discovery = await discoverProviders();
     configuration = buildExecutionCommand({ ...request, projectPath: root }, discovery);
     if (item.cancelRequested) {
+      await cleanupProviderTempDirectory(temporaryDirectory);
       sendEvent(record, emit, { executionId, kind: 'cancelled', text: 'Starting execution cancelled.', exitCode: null });
       return;
     }
@@ -160,9 +201,15 @@ async function launchProcess(item) {
       shell: false,
       windowsHide: true,
       // VCS credentials belong to the main-process API client, never to an AI provider.
-      env: providerEnvironment(),
+      env: {
+        ...providerEnvironment(),
+        TMPDIR: temporaryDirectory,
+        TMP: temporaryDirectory,
+        TEMP: temporaryDirectory,
+      },
     });
   } catch (error) {
+    await cleanupProviderTempDirectory(temporaryDirectory);
     sendEvent(record, emit, { executionId, kind: 'failed', text: error instanceof Error ? error.message : String(error), exitCode: null });
     return;
   }
@@ -186,14 +233,14 @@ async function launchProcess(item) {
   child.on('error', (error) => {
     if (!clearProcess()) return;
     sendEvent(record, emit, { executionId, kind: 'failed', text: error.message, exitCode: null });
-    void pumpQueue();
+    void cleanupProviderTempDirectory(temporaryDirectory).finally(() => pumpQueue());
   });
   child.on('close', (code, signal) => {
     if (!clearProcess()) return;
     sendEvent(record, emit, signal
       ? { executionId, kind: 'cancelled', text: `Process terminated with ${signal}.`, exitCode: code }
       : { executionId, kind: code === 0 ? 'completed' : 'failed', exitCode: code });
-    void pumpQueue();
+    void cleanupProviderTempDirectory(temporaryDirectory).finally(() => pumpQueue());
   });
 }
 
@@ -283,6 +330,8 @@ module.exports = {
   evaluateExecutionGuardrails,
   closeProcessInput,
   providerEnvironment,
+  ensureProviderTempDirectory,
+  cleanupProviderTempDirectory,
   stripAnsi,
   normalizeMaxConcurrentJobs,
   listPromptJobs,

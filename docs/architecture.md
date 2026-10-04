@@ -83,6 +83,8 @@ The initial OpenCode adapter runs the installed `models --verbose` command and f
 
 Provider process output is normalized in the main process before it is persisted or emitted. Terminal control sequences and carriage-return artifacts are removed, while the job page keeps stdout, stderr, errors, and system events filterable so provider progress does not obscure the agent response.
 
+Every provider execution also gets a unique project-local temporary directory at `.AgentSmith/tmp/<execution-id>`. The process environment points common temporary-directory variables at it, and the directory is removed when the child exits.
+
 ## Prompt Composition
 
 `PromptComposer` creates ordered sections: operating contract, global instructions, provider instructions, project instructions, role, goals, guardrails, project structure, README/package manifests, Git context, selected files, and user task. Each section is retained in the preview model, so the preview and the execution request share the same generated prompt. Context sources are opt-in except global/project instructions, project structure, and Git status defaults. Files added from the Explorer are read through the same guarded main-process API before entering the prompt.

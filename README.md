@@ -41,6 +41,7 @@ Writes are versioned, validated, backed up, and performed through a temporary fi
 * **Make a suggestion** on the task editor: a role-aware feature-proposal prompt that can be regenerated, accepted into the task, and reviewed before anything runs.
 * Explicit process confirmation, streaming stdout/stderr, exit status, and cancellation.
 * Readable provider jobs with ANSI-cleaned output and separate Agent output, logs, errors, and system filters.
+* Provider temporary files are scoped to `.AgentSmith/tmp/<execution-id>` inside the selected project and removed after the run.
 * English i18n resources, locale-ready formatting, and dark/light theme support.
 
 ## Feature Suggestions

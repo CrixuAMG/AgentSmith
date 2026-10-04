@@ -35,7 +35,7 @@ export function composeIssueAuditPrompt(input: IssueAuditInput): { title: string
   const text = [
     `Review the current state of ${repository} and prepare actionable GitHub issue drafts for the project owner.`,
     '',
-    'This is an analysis-only step. Do not change files, run destructive commands, call GitHub, or claim that an issue was created. AgentSmith will show the drafts to a human and create only the drafts that human confirms.',
+    'This is an analysis-only step. Do not change files, run destructive commands, call GitHub, or claim that an issue was created. If a temporary file is unavoidable, use .AgentSmith/tmp inside the selected project root rather than the host system temporary directory. AgentSmith will show the drafts to a human and create only the drafts that human confirms.',
     '',
     'Return ONLY a JSON array. Do not use Markdown fences, commentary, or a preamble. Each array item must have exactly this useful shape:',
     '[{"title":"Short actionable title","body":"Evidence, impact, and concrete acceptance criteria.","labels":["bug"]}]',

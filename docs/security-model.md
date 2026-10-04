@@ -41,6 +41,7 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * The safe default does not pass OpenCode's `--auto` option. The UI warns that provider permissions are still provider-controlled.
 * Output is streamed to the current session but not persisted by default. Diagnostics redact obvious token/key patterns and never log file contents. A generated feature suggestion is an exception: it is written to the local suggestions directory by design, never transmitted by AgentSmith itself, and never sent to a provider unless the user accepts it and confirms execution.
 * Provider output is treated as untrusted text. Terminal control sequences are stripped before output is persisted or displayed, and the renderer displays text rather than injecting provider output as HTML.
+* Each provider run receives `TMPDIR`, `TMP`, and `TEMP` pointing to a private `.AgentSmith/tmp/<execution-id>` directory inside the canonical project root. The directory is mode `0700` and is removed after the child exits. AgentSmith cannot intercept a provider command that hardcodes another absolute path.
 * Cancellation sends `SIGTERM`, then escalates only after a short grace period.
 
 ## Hosted Repository Rules
