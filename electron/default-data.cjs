@@ -149,6 +149,7 @@ const defaultGuardrails = [
       { id: 'deny-env', type: 'file_access', pattern: '**/.env*', action: 'deny', enabled: true, enforcement: 'application', description: 'Block environment files and their variants from the viewer and prompt context.' },
       { id: 'deny-private-keys', type: 'file_access', pattern: '**/*.{pem,key,p12}', action: 'deny', enabled: true, enforcement: 'application', description: 'Block common private key files.' },
       { id: 'no-destructive-git', type: 'command', pattern: 'git reset --hard', action: 'deny', enabled: true, enforcement: 'prompt', description: 'Tell the provider not to run destructive Git operations.' },
+      { id: 'no-merge', type: 'command', pattern: 'merge a branch or pull request', action: 'deny', enabled: true, enforcement: 'prompt', description: 'The agent never merges. Merging stays a human decision, and AgentSmith exposes no merge action.' },
       { id: 'project-root', type: 'filesystem_write', pattern: 'outside project root', action: 'deny', enabled: true, enforcement: 'application', description: 'AgentSmith project writes stay inside the selected project root.' },
       { id: 'confirm-dependencies', type: 'command', pattern: 'install dependencies', action: 'confirm', enabled: true, enforcement: 'prompt', description: 'Require explicit user confirmation before dependency installation.' },
     ],
@@ -171,6 +172,10 @@ const defaultProviderSettings = [
   { id: 'codex', name: 'Codex', executable: 'codex', enabled: true },
 ];
 
+const defaultVcsSettings = [
+  { id: 'github', name: 'GitHub', webUrl: 'https://github.com', enabled: true },
+];
+
 const defaultProfiles = [{
   version: 1,
   id: 'default-agent',
@@ -183,4 +188,4 @@ const defaultProfiles = [{
   guardrailProfileId: 'default-security',
 }];
 
-module.exports = { defaultConfig, defaultLayout, defaultGoals, defaultRoles, defaultGuardrails, defaultProviderSettings, defaultProfiles };
+module.exports = { defaultConfig, defaultLayout, defaultGoals, defaultRoles, defaultGuardrails, defaultProviderSettings, defaultVcsSettings, defaultProfiles };

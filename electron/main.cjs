@@ -3,8 +3,15 @@ const path = require('node:path');
 
 const { loadSnapshot, saveResource, root: storageRoot } = require('./config-store.cjs');
 const projectService = require('./project-service.cjs');
-const { gitStatus, gitDiff, gitLog, gitBranches, gitPush } = require('./git-service.cjs');
+const { gitStatus, gitDiff, gitLog, gitBranches, gitPush, gitRemote } = require('./git-service.cjs');
 const { discoverProviders } = require('./provider-service.cjs');
+const {
+  createRepositoryIssue,
+  discoverVcsProviders,
+  listRepositoryIssues,
+  setVcsCredential,
+  updateRepositoryIssue,
+} = require('./vcs-service.cjs');
 const { startProcess, cancelProcess, cancelAllProcesses, hydrateJobs, listPromptJobs } = require('./process-service.cjs');
 const { saveSuggestion } = require('./suggestion-service.cjs');
 const { buildExternalPermissions, writeOpencodeJsonc } = require('./permissions-service.cjs');
@@ -55,10 +62,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('git:log', (_event, project, options) => gitLog(project, options || {}));
   ipcMain.handle('git:branches', (_event, project) => gitBranches(project));
   ipcMain.handle('git:push', (_event, project) => gitPush(project));
+  ipcMain.handle('git:remote', (_event, project) => gitRemote(project));
   ipcMain.handle('instructions:list', (_event, project) => projectService.listInstructions(project, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('instructions:read', (_event, project, relativePath, guardrails) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md'), guardrails));
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('providers:discover', () => discoverProviders());
+  // Repository credentials are accepted here and held in main-process memory for the
+  // session. No merge channel exists: issues are the only repository write AgentSmith has.
+  ipcMain.handle('vcs:discover', () => discoverVcsProviders());
+  ipcMain.handle('vcs:credential', (_event, providerId, token) => setVcsCredential(providerId, token));
+  ipcMain.handle('vcs:issues:list', (_event, project, options) => listRepositoryIssues(project, options || {}));
+  ipcMain.handle('vcs:issues:create', (_event, project, draft) => createRepositoryIssue(project, draft));
+  ipcMain.handle('vcs:issues:update', (_event, project, number, patch) => updateRepositoryIssue(project, number, patch));
   ipcMain.handle('suggestions:save', (_event, project, content) => saveSuggestion(path.join(storageRoot, 'suggestions'), project, content));
   ipcMain.handle('process:start', async (_event, request) => {
     const snapshot = await loadSnapshot();

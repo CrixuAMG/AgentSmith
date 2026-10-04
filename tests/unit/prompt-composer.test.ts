@@ -47,6 +47,7 @@ describe('prompt composition', () => {
       'role',
       'goals',
       'guardrails',
+      'repository-workflow',
       'project',
       'project-structure',
       'readme',

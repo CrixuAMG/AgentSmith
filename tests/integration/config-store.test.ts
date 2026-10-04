@@ -9,7 +9,7 @@ const configRoot = mkdtempSync(path.join(os.tmpdir(), 'agentsmith-config-'));
 process.env.AGENTSMITH_CONFIG_ROOT = configRoot;
 const require = createRequire(import.meta.url);
 const configStore = require('../../electron/config-store.cjs') as {
-  loadSnapshot: () => Promise<{ config: { theme: string; maxConcurrentJobs: number; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; promptJobs: Array<{ state: string }>; storageRoot: string; warnings: string[] }>;
+  loadSnapshot: () => Promise<{ config: { theme: string; maxConcurrentJobs: number; layout: { version: number; railWidth: number; explorerRatio: number; tab: string } }; providerInstructions: Record<string, string>; promptHistory: Record<string, Array<{ prompt: string }>>; promptJobs: Array<{ state: string }>; vcsSettings: Array<{ id: string; name: string; webUrl: string; enabled: boolean }>; projects: Array<{ id: string; repository?: { owner: string; name: string } | null }>; storageRoot: string; warnings: string[] }>;
   saveResource: (key: string, value: unknown) => Promise<void>;
 };
 
@@ -92,6 +92,32 @@ describe('configuration storage', () => {
     writeFileSync(path.join(configRoot, 'projects.json'), JSON.stringify({ version: 1, projects: [], customField: 'keep' }), 'utf8');
     await configStore.saveResource('projects', []);
     expect(JSON.parse(readFileSync(path.join(configRoot, 'projects.json'), 'utf8')).customField).toBe('keep');
+  });
+
+  it('stores version-control settings and a repository link without credentials', async () => {
+    const initial = await configStore.loadSnapshot();
+    expect(initial.vcsSettings).toEqual([{ id: 'github', name: 'GitHub', webUrl: 'https://github.com', enabled: true }]);
+    expect(existsSync(path.join(configRoot, 'vcs', 'providers.json'))).toBe(true);
+
+    await expect(configStore.saveResource('vcsSettings', [{ id: 'github', name: 'GitHub', webUrl: 'https://github.com', enabled: false, token: 'ghp_shouldnotpersist' }]))
+      .rejects.toThrow('Invalid vcsSettings resource');
+    await expect(configStore.saveResource('vcsSettings', [{ id: 'github', name: 'GitHub', webUrl: 'http://github.com', enabled: true }]))
+      .rejects.toThrow('Invalid vcsSettings resource');
+
+    await configStore.saveResource('vcsSettings', [{ id: 'github', name: 'GitHub', webUrl: 'https://github.com', enabled: true }]);
+    expect((await configStore.loadSnapshot()).vcsSettings[0].enabled).toBe(true);
+
+    const project = { id: 'project-1', name: 'Example', path: '/tmp/example', lastOpenedAt: '2026-10-02T00:00:00.000Z', repository: { providerId: 'github', host: 'github.com', owner: 'example', name: 'agent', defaultBranch: 'main' } };
+    await configStore.saveResource('projects', [project]);
+    expect((await configStore.loadSnapshot()).projects[0].repository).toEqual(project.repository);
+    expect(readFileSync(path.join(configRoot, 'projects.json'), 'utf8')).not.toMatch(/gh[pousr]_/);
+
+    // A credential-shaped value in the link is refused instead of being written to disk.
+    await expect(configStore.saveResource('projects', [{ ...project, repository: { ...project.repository, name: 'ghp_aaaaaaaaaaaaaaaaaaaa' } }]))
+      .rejects.toThrow('Invalid projects resource');
+    await expect(configStore.saveResource('projects', [{ ...project, repository: { providerId: 'bitbucket', host: 'bitbucket.org', owner: 'example', name: 'agent', defaultBranch: 'main' } }]))
+      .rejects.toThrow('Invalid projects resource');
+    expect((await configStore.loadSnapshot()).projects[0].repository.name).toBe('agent');
   });
 
   it('does not quarantine or overwrite future schema versions', async () => {

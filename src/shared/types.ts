@@ -5,6 +5,7 @@ export type ViewId =
   | 'projects'
   | 'prompt-studio'
   | 'prompt-job'
+  | 'issues'
   | 'agent-profiles'
   | 'personalization'
   | 'settings';
@@ -36,6 +37,7 @@ export interface Project {
   path: string;
   lastOpenedAt: string;
   allowedExternalPaths?: string[];
+  repository?: RepositoryLink | null;
 }
 
 export interface Goal {
@@ -222,6 +224,114 @@ export interface GitPushResult {
   message: string;
 }
 
+export type VcsProviderId = 'github' | 'gitlab';
+
+export interface VcsProviderSetting {
+  id: VcsProviderId;
+  name: string;
+  webUrl: string;
+  enabled: boolean;
+}
+
+/** A repository is derived from the project Git remote; it carries no credentials. */
+export interface RepositoryLink {
+  providerId: VcsProviderId;
+  host: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+}
+
+export interface RepositoryDetection {
+  remote: string | null;
+  link: RepositoryLink | null;
+  error: string | null;
+}
+
+/**
+ * Repository capabilities the agent may use on its own. `merges` is always false:
+ * AgentSmith has no merge operation and refuses to authorize one through configuration.
+ */
+export interface RepositoryCapabilities {
+  source: 'agents-md' | 'default';
+  issues: boolean;
+  branches: boolean;
+  pullRequests: boolean;
+  merges: false;
+  mergeRequestDenied: boolean;
+}
+
+export interface RepositoryIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: 'open' | 'closed';
+  url: string;
+  author: string;
+  labels: string[];
+  comments: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDraft {
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+export interface IssuePatch {
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  labels?: string[];
+}
+
+export interface IssueListResult {
+  ok: boolean;
+  repository: string;
+  issues: RepositoryIssue[];
+  error: string | null;
+}
+
+export interface IssueWriteResult {
+  ok: boolean;
+  issue: RepositoryIssue | null;
+  error: string | null;
+}
+
+export interface VcsProviderCapabilities {
+  supportsIssues: boolean;
+  supportsBranches: boolean;
+  supportsPullRequests: boolean;
+  supportsMerge: false;
+}
+
+export type VcsCredentialSource = 'session' | 'environment' | 'none';
+
+export interface VcsCredentialState {
+  providerId: VcsProviderId;
+  configured: boolean;
+  source: VcsCredentialSource;
+}
+
+export interface VcsProviderDiscovery {
+  installation: {
+    providerId: VcsProviderId;
+    connected: boolean;
+    account: string | null;
+    error: string | null;
+  };
+  capabilities: VcsProviderCapabilities;
+  credential: VcsCredentialState;
+  note: string | null;
+}
+
+export interface PromptFromIssue {
+  title: string;
+  text: string;
+}
+
 export interface InstructionFile {
   relativePath: string;
   absolutePath: string;
@@ -267,6 +377,7 @@ export interface PromptCompositionInput {
   packageJson: string;
   gitStatus: string;
   gitDiff: string;
+  repositoryWorkflow?: string;
   selectedFiles: Array<{ path: string; content: string }>;
   contexts: PromptContextOptions;
   contextPaths?: Partial<Record<keyof PromptContextOptions, string | null>>;
@@ -276,7 +387,7 @@ export type ContextDecision = 'allow' | 'warn' | 'confirm' | 'deny';
 
 export interface PromptContextManifestEntry {
   id: string;
-  kind: 'file' | 'diff' | 'instruction' | 'structure' | 'git-status' | 'global' | 'provider' | 'project' | 'role' | 'goals' | 'guardrails' | 'task';
+  kind: 'file' | 'diff' | 'instruction' | 'structure' | 'git-status' | 'global' | 'provider' | 'project' | 'role' | 'goals' | 'guardrails' | 'repository' | 'task';
   path: string | null;
   included: boolean;
   bytes: number | null;
@@ -405,6 +516,7 @@ export interface AppSnapshot {
   guardrails: GuardrailProfile[];
   profiles: AgentProfile[];
   providerSettings: ProviderSetting[];
+  vcsSettings: VcsProviderSetting[];
   globalInstructions: string;
   providerInstructions: Record<string, string>;
   promptHistory: Record<string, PromptHistoryEntry[]>;
@@ -413,7 +525,7 @@ export interface AppSnapshot {
   warnings: string[];
 }
 
-export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'globalInstructions' | 'providerInstructions' | 'promptHistory' | 'promptJobs';
+export type ResourceKey = 'config' | 'projects' | 'goals' | 'roles' | 'guardrails' | 'profiles' | 'providerSettings' | 'vcsSettings' | 'globalInstructions' | 'providerInstructions' | 'promptHistory' | 'promptJobs';
 
 export interface AgentSmithApi {
   loadSnapshot(): Promise<AppSnapshot>;
@@ -427,10 +539,16 @@ export interface AgentSmithApi {
   gitLog(project: Project, options: { branch?: string | null; limit: number }): Promise<GitLog>;
   gitBranches(project: Project): Promise<GitBranchList>;
   gitPush(project: Project): Promise<GitPushResult>;
+  gitRemote(project: Project): Promise<RepositoryDetection>;
   listInstructions(project: Project): Promise<InstructionFile[]>;
   readInstruction(project: Project, relativePath: string, guardrails?: GuardrailProfile | null): Promise<string>;
   writeInstruction(project: Project, relativePath: string, content: string, overwrite: boolean): Promise<void>;
   discoverProviders(): Promise<ProviderDiscovery[]>;
+  discoverVcsProviders(): Promise<VcsProviderDiscovery[]>;
+  setVcsCredential(providerId: VcsProviderId, token: string | null): Promise<VcsCredentialState>;
+  listRepositoryIssues(project: Project, options: { state: 'open' | 'closed' | 'all' }): Promise<IssueListResult>;
+  createRepositoryIssue(project: Project, draft: IssueDraft): Promise<IssueWriteResult>;
+  updateRepositoryIssue(project: Project, number: number, patch: IssuePatch): Promise<IssueWriteResult>;
   saveSuggestion(project: Project, content: string): Promise<SavedSuggestion>;
   startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; jobId?: string; command: string | null }>;
   cancelProcess(executionId: string): Promise<void>;

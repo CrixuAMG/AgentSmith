@@ -41,6 +41,7 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
       promptGuardrailText(input.guardrails),
       Boolean(input.guardrails),
     ),
+    section('repository-workflow', 'Repository workflow', input.repositoryWorkflow ?? '', Boolean(clean(input.repositoryWorkflow ?? ''))),
     section(
       'project',
       'Selected project',
@@ -94,6 +95,7 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
     if (id === 'role') return 'role';
     if (id === 'goals') return 'goals';
     if (id === 'guardrails') return 'guardrails';
+    if (id === 'repository-workflow') return 'repository';
     if (id === 'task') return 'task';
     return 'file';
   };
@@ -115,7 +117,7 @@ export function composePrompt(input: PromptCompositionInput): PromptComposition 
         blockedContexts.push({ path, reason: reason ?? 'Blocked by active guardrails.' });
       }
     }
-    if (!sourceSections.has(item.id) && item.id !== 'task' && item.id !== 'project' && item.id !== 'role' && item.id !== 'goals' && item.id !== 'guardrails') continue;
+    if (!sourceSections.has(item.id) && !['task', 'project', 'role', 'goals', 'guardrails', 'repository-workflow'].includes(item.id)) continue;
     const content = item.content;
     entries.push({
       id: item.id,

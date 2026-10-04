@@ -7,7 +7,7 @@ import i18n from '@/renderer/i18n';
 import AgentProfilesPage from '@/renderer/pages/AgentProfilesPage.vue';
 import PersonalizationPage from '@/renderer/pages/PersonalizationPage.vue';
 import { store } from '@/renderer/services/store';
-import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES } from '@/shared/defaults';
+import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 import type { AppSnapshot } from '@/shared/types';
 
 const saves = vi.hoisted(() => [] as Array<{ key: string; value: unknown }>);
@@ -32,6 +32,7 @@ function snapshot(): AppSnapshot {
     guardrails: structuredClone(DEFAULT_GUARDRAILS),
     profiles: structuredClone(DEFAULT_PROFILES),
     providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
+    vcsSettings: structuredClone(DEFAULT_VCS_SETTINGS),
     globalInstructions: '',
     providerInstructions: {},
     promptHistory: {},

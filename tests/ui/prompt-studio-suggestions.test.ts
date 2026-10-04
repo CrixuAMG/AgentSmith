@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PromptStudioPage from '@/renderer/pages/PromptStudioPage.vue';
 import i18n from '@/renderer/i18n';
 import { store } from '@/renderer/services/store';
-import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES } from '@/shared/defaults';
+import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 
 const savedSuggestions: string[] = [];
 const suggestionFailure: { message: string | null } = { message: null };
@@ -41,6 +41,7 @@ function snapshot() {
     guardrails: structuredClone(DEFAULT_GUARDRAILS),
     profiles: structuredClone(DEFAULT_PROFILES),
     providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
+    vcsSettings: structuredClone(DEFAULT_VCS_SETTINGS),
     globalInstructions: '',
     providerInstructions: {},
     promptHistory: {},

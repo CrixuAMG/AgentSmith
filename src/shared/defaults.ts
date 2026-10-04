@@ -5,6 +5,7 @@ import type {
   GuardrailProfile,
   ProviderSetting,
   Role,
+  VcsProviderSetting,
 } from './types';
 import { DEFAULT_WORKSPACE_LAYOUT } from './layout';
 
@@ -242,6 +243,15 @@ export const DEFAULT_GUARDRAILS: GuardrailProfile[] = [
         description: 'Tell the provider not to run destructive Git operations.',
       },
       {
+        id: 'no-merge',
+        type: 'command',
+        pattern: 'merge a branch or pull request',
+        action: 'deny',
+        enabled: true,
+        enforcement: 'prompt',
+        description: 'The agent never merges. Merging stays a human decision, and AgentSmith exposes no merge action.',
+      },
+      {
         id: 'project-root',
         type: 'filesystem_write',
         pattern: 'outside project root',
@@ -301,6 +311,10 @@ export const DEFAULT_GUARDRAILS: GuardrailProfile[] = [
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSetting[] = [
   { id: 'opencode', name: 'OpenCode', executable: 'opencode', enabled: true },
   { id: 'codex', name: 'Codex', executable: 'codex', enabled: true },
+];
+
+export const DEFAULT_VCS_SETTINGS: VcsProviderSetting[] = [
+  { id: 'github', name: 'GitHub', webUrl: 'https://github.com', enabled: true },
 ];
 
 export const DEFAULT_PROFILES: AgentProfile[] = [

@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES } from '@/shared/defaults';
+import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 import { toRaw } from 'vue';
 import type {
   AgentExecutionRequest,
@@ -12,11 +12,19 @@ import type {
   GitStatus,
   GuardrailProfile,
   InstructionFile,
+  IssueDraft,
+  IssueListResult,
+  IssuePatch,
+  IssueWriteResult,
   Project,
   ProjectFileNode,
   PromptJob,
   ResourceKey,
+  RepositoryDetection,
   SavedSuggestion,
+  VcsCredentialState,
+  VcsProviderDiscovery,
+  VcsProviderId,
 } from '@/shared/types';
 
 const fallbackSnapshot: AppSnapshot = {
@@ -27,6 +35,7 @@ const fallbackSnapshot: AppSnapshot = {
   guardrails: structuredClone(DEFAULT_GUARDRAILS),
   profiles: structuredClone(DEFAULT_PROFILES),
   providerSettings: structuredClone(DEFAULT_PROVIDER_SETTINGS),
+  vcsSettings: structuredClone(DEFAULT_VCS_SETTINGS),
   globalInstructions: '',
   providerInstructions: {},
   promptHistory: {},
@@ -58,6 +67,7 @@ function browserApi(): AgentSmithApi {
       if (key === 'guardrails') snapshot.guardrails = value as AppSnapshot['guardrails'];
       if (key === 'profiles') snapshot.profiles = value as AppSnapshot['profiles'];
       if (key === 'providerSettings') snapshot.providerSettings = value as AppSnapshot['providerSettings'];
+      if (key === 'vcsSettings') snapshot.vcsSettings = value as AppSnapshot['vcsSettings'];
       if (key === 'globalInstructions') snapshot.globalInstructions = String(value);
       if (key === 'providerInstructions') snapshot.providerInstructions = value as AppSnapshot['providerInstructions'];
       if (key === 'promptHistory') snapshot.promptHistory = value as AppSnapshot['promptHistory'];
@@ -90,6 +100,9 @@ function browserApi(): AgentSmithApi {
     async gitPush(): Promise<GitPushResult> {
       return { ok: false, message: 'Git push requires the desktop application.' };
     },
+    async gitRemote(): Promise<RepositoryDetection> {
+      return { remote: null, link: null, error: 'Repository detection requires the desktop application.' };
+    },
     async listInstructions(): Promise<InstructionFile[]> {
       return [];
     },
@@ -101,6 +114,21 @@ function browserApi(): AgentSmithApi {
     },
     async discoverProviders() {
       return [];
+    },
+    async discoverVcsProviders(): Promise<VcsProviderDiscovery[]> {
+      return [];
+    },
+    async setVcsCredential(_providerId: VcsProviderId, _token: string | null): Promise<VcsCredentialState> {
+      throw new Error('Repository credentials require the desktop application.');
+    },
+    async listRepositoryIssues(_project: Project, _options: { state: 'open' | 'closed' | 'all' }): Promise<IssueListResult> {
+      return { ok: false, repository: '', issues: [], error: 'Repository issues require the desktop application.' };
+    },
+    async createRepositoryIssue(_project: Project, _draft: IssueDraft): Promise<IssueWriteResult> {
+      return { ok: false, issue: null, error: 'Repository issues require the desktop application.' };
+    },
+    async updateRepositoryIssue(_project: Project, _number: number, _patch: IssuePatch): Promise<IssueWriteResult> {
+      return { ok: false, issue: null, error: 'Repository issues require the desktop application.' };
     },
     async saveSuggestion(): Promise<SavedSuggestion> {
       throw new Error('Suggestion storage requires the desktop application.');
@@ -141,9 +169,13 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     gitLog: (project, options) => bridge.gitLog(toPlainIpcValue(project), toPlainIpcValue(options)),
     gitBranches: (project) => bridge.gitBranches(toPlainIpcValue(project)),
     gitPush: (project) => bridge.gitPush(toPlainIpcValue(project)),
+    gitRemote: (project) => bridge.gitRemote(toPlainIpcValue(project)),
     listInstructions: (project) => bridge.listInstructions(toPlainIpcValue(project)),
     readInstruction: (project, relativePath, guardrails) => bridge.readInstruction(toPlainIpcValue(project), relativePath, toPlainIpcValue(guardrails)),
     writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
+    listRepositoryIssues: (project, options) => bridge.listRepositoryIssues(toPlainIpcValue(project), toPlainIpcValue(options)),
+    createRepositoryIssue: (project, draft) => bridge.createRepositoryIssue(toPlainIpcValue(project), toPlainIpcValue(draft)),
+    updateRepositoryIssue: (project, number, patch) => bridge.updateRepositoryIssue(toPlainIpcValue(project), number, toPlainIpcValue(patch)),
     saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
     listPromptJobs: () => bridge.listPromptJobs(),

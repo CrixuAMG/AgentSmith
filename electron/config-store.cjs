@@ -8,6 +8,7 @@ const {
   defaultRoles,
   defaultGuardrails,
   defaultProviderSettings,
+  defaultVcsSettings,
   defaultProfiles,
 } = require('./default-data.cjs');
 
@@ -15,13 +16,14 @@ const root = process.env.AGENTSMITH_CONFIG_ROOT || (process.platform === 'win32'
   ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'AgentSmith')
   : path.join(os.homedir(), '.config', 'AgentSmith'));
 
-const directories = ['goals', 'roles', 'guardrails', 'providers', 'prompts', 'instructions', 'suggestions', 'logs'];
+const directories = ['goals', 'roles', 'guardrails', 'providers', 'prompts', 'instructions', 'suggestions', 'logs', 'vcs'];
 const resourceFiles = {
   config: 'config.json',
   projects: 'projects.json',
   profiles: 'profiles.json',
   providerSettings: path.join('providers', 'providers.json'),
   providerInstructions: path.join('providers', 'instructions.json'),
+  vcsSettings: path.join('vcs', 'providers.json'),
   promptHistory: path.join('prompts', 'history.json'),
   promptJobs: path.join('prompts', 'jobs.json'),
 };
@@ -51,12 +53,28 @@ function validRule(value) {
     && (value.description === undefined || isString(value.description));
 }
 
+// The repository link is derived from the Git remote. It holds no credential, and a
+// token-shaped value in any of its fields is rejected instead of being persisted.
+function validRepositoryLink(value) {
+  if (value === undefined || value === null) return true;
+  if (!isObject(value)) return false;
+  const textFields = [value.providerId, value.host, value.owner, value.name, value.defaultBranch];
+  if (!textFields.every(isString)) return false;
+  if (!['github', 'gitlab'].includes(value.providerId)) return false;
+  if (textFields.some((field) => /\s/.test(field))) return false;
+  if (textFields.some((field) => /gh[pousr]_[A-Za-z0-9]{16,}|glpat-|authorization|bearer\s/i.test(field))) return false;
+  if (!/^[A-Za-z0-9._-]+$/.test(value.host)) return false;
+  if (!value.host || !value.owner || !value.name) return false;
+  return /^[\w./-]+$/.test(value.owner) && /^[\w.-]+$/.test(value.name);
+}
+
 function validProject(value) {
   return isObject(value)
     && isString(value.id)
     && isString(value.name)
     && isString(value.path)
-    && isString(value.lastOpenedAt);
+    && isString(value.lastOpenedAt)
+    && validRepositoryLink(value.repository);
 }
 
 function validGoal(value) {
@@ -110,6 +128,18 @@ function validProviderSetting(value) {
     && isString(value.name)
     && (value.executable === null || isString(value.executable))
     && isBoolean(value.enabled);
+}
+
+// Version-control settings hold host and account-free configuration only; a credential
+// is never accepted as part of this document.
+function validVcsProviderSetting(value) {
+  return isObject(value)
+    && ['github', 'gitlab'].includes(value.id)
+    && isString(value.name)
+    && isString(value.webUrl)
+    && /^https:\/\/[^\s/]+/.test(value.webUrl)
+    && isBoolean(value.enabled)
+    && !Object.keys(value).some((key) => /token|secret|password|credential|key/i.test(key));
 }
 
 function clampLayoutDimension(value, limits, fallback) {
@@ -230,6 +260,7 @@ function validDocument(value, kind) {
   if (kind === 'projects') return Array.isArray(value.projects) && value.projects.every(validProject);
   if (kind === 'profiles') return Array.isArray(value.profiles) && value.profiles.every(validProfile);
   if (kind === 'providerSettings') return Array.isArray(value.providers) && value.providers.every(validProviderSetting);
+  if (kind === 'vcsSettings') return Array.isArray(value.providers) && value.providers.every(validVcsProviderSetting);
   if (kind === 'providerInstructions') return validProviderInstructions(value.instructions);
   if (kind === 'promptHistory') return validPromptHistory(value.entries);
   if (kind === 'promptJobs') return validPromptJobs(value.jobs);
@@ -338,6 +369,7 @@ async function loadSnapshot() {
   const projectsEnvelope = await readJson(path.join(root, resourceFiles.projects), { version: 1, projects: [] }, warnings, 'projects');
   const profilesEnvelope = await readJson(path.join(root, resourceFiles.profiles), { version: 1, profiles: defaultProfiles }, warnings, 'profiles');
   const providerEnvelope = await readJson(path.join(root, resourceFiles.providerSettings), { version: 1, providers: defaultProviderSettings }, warnings, 'providerSettings');
+  const vcsEnvelope = await readJson(path.join(root, resourceFiles.vcsSettings), { version: 1, providers: defaultVcsSettings }, warnings, 'vcsSettings');
   const providerInstructionsEnvelope = await readJson(path.join(root, resourceFiles.providerInstructions), { version: 1, instructions: {} }, warnings, 'providerInstructions');
   const promptHistoryEnvelope = await readJson(path.join(root, resourceFiles.promptHistory), { version: 1, entries: {} }, warnings, 'promptHistory');
   const promptJobsEnvelope = await readJson(path.join(root, resourceFiles.promptJobs), { version: 1, jobs: [] }, warnings, 'promptJobs');
@@ -355,6 +387,7 @@ async function loadSnapshot() {
     guardrails,
     profiles: Array.isArray(profilesEnvelope.profiles) ? profilesEnvelope.profiles : clone(defaultProfiles),
     providerSettings: Array.isArray(providerEnvelope.providers) ? providerEnvelope.providers : clone(defaultProviderSettings),
+    vcsSettings: Array.isArray(vcsEnvelope.providers) ? vcsEnvelope.providers : clone(defaultVcsSettings),
     globalInstructions,
     providerInstructions: isObject(providerInstructionsEnvelope.instructions) ? providerInstructionsEnvelope.instructions : {},
     promptHistory: isObject(promptHistoryEnvelope.entries) ? promptHistoryEnvelope.entries : {},
@@ -375,6 +408,7 @@ function assertValidResource(key, value) {
     projects: { version: 1, projects: value },
     profiles: { version: 1, profiles: value },
     providerSettings: { version: 1, providers: value },
+    vcsSettings: { version: 1, providers: value },
     providerInstructions: { version: 1, instructions: value },
     promptHistory: { version: 1, entries: value },
     promptJobs: { version: 1, jobs: value },
@@ -417,6 +451,12 @@ async function saveResource(key, value) {
   if (key === 'providerSettings') {
     assertValidResource(key, value);
     const filePath = path.join(root, resourceFiles.providerSettings);
+    await writeAtomic(filePath, await mergeEnvelope(filePath, { providers: clone(value) }));
+    return;
+  }
+  if (key === 'vcsSettings') {
+    assertValidResource(key, value);
+    const filePath = path.join(root, resourceFiles.vcsSettings);
     await writeAtomic(filePath, await mergeEnvelope(filePath, { providers: clone(value) }));
     return;
   }

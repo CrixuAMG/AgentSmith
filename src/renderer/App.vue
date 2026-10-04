@@ -8,6 +8,7 @@ import AgentProfilesPage from './pages/AgentProfilesPage.vue';
 import PersonalizationPage from './pages/PersonalizationPage.vue';
 import PromptStudioPage from './pages/PromptStudioPage.vue';
 import PromptJobPage from './pages/PromptJobPage.vue';
+import IssuesPage from './pages/IssuesPage.vue';
 import ProjectsPage from './pages/ProjectsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import CommandPalette from './components/CommandPalette.vue';
@@ -30,6 +31,7 @@ const navigation = computed(() => [
   { id: 'projects' as const, label: t('nav.projects'), icon: '⌘' },
   { id: 'prompt-studio' as const, label: t('nav.promptStudio'), icon: '>' },
   { id: 'prompt-job' as const, label: t('nav.promptJob'), icon: '◌' },
+  { id: 'issues' as const, label: t('nav.issues'), icon: '#' },
   { id: 'agent-profiles' as const, label: t('nav.agentProfiles'), icon: '◎' },
   { id: 'personalization' as const, label: t('nav.personalization'), icon: '✦' },
   { id: 'settings' as const, label: t('nav.settings'), icon: '⚙' },
@@ -204,6 +206,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalKeydown)
         <ProjectsPage v-else-if="store.activeView === 'projects'" />
         <PromptStudioPage v-else-if="store.activeView === 'prompt-studio'" />
         <PromptJobPage v-else-if="store.activeView === 'prompt-job'" />
+        <IssuesPage v-else-if="store.activeView === 'issues'" />
         <AgentProfilesPage v-else-if="store.activeView === 'agent-profiles'" />
         <PersonalizationPage v-else-if="store.activeView === 'personalization'" />
         <SettingsPage v-else-if="store.activeView === 'settings'" />

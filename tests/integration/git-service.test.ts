@@ -15,6 +15,7 @@ const gitService = require('../../electron/git-service.cjs') as {
   gitLog: (project: { path: string }, options: { branch?: string | null; limit: number }) => Promise<{ commits: Array<{ subject: string; shortHash: string }>; error: string | null }>;
   gitBranches: (project: { path: string }) => Promise<{ current: string | null; branches: Array<{ name: string; isCurrent: boolean; upstream: string | null }>; error: string | null }>;
   gitPush: (project: { path: string }) => Promise<{ ok: boolean; message: string }>;
+  gitRemote: (project: { path: string }) => Promise<{ remote: string | null; link: { providerId: string; host: string; owner: string; name: string; defaultBranch: string } | null; error: string | null }>;
 };
 
 const directories: string[] = [];
@@ -103,5 +104,28 @@ describe('Git history integration', () => {
     const result = await gitService.gitPush({ path: root });
     expect(result.ok).toBe(false);
     expect(result.message.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Git remote detection integration', () => {
+  it('derives the repository link from the origin remote without contacting the provider', async () => {
+    const root = await seedRepository();
+    await execFileAsync('git', ['remote', 'add', 'origin', 'git@github.com:example/agent.git'], { cwd: root });
+
+    const detected = await gitService.gitRemote({ path: root });
+    expect(detected.error).toBeNull();
+    expect(detected.remote).toBe('origin');
+    expect(detected.link).toEqual({ providerId: 'github', host: 'github.com', owner: 'example', name: 'agent', defaultBranch: 'main' });
+  });
+
+  it('reports an unsupported or missing remote instead of guessing a repository', async () => {
+    const withoutRemote = await seedRepository();
+    expect(await gitService.gitRemote({ path: withoutRemote })).toEqual({ remote: null, link: null, error: 'This project has no Git remote to link a repository to.' });
+
+    const selfHosted = await seedRepository();
+    await execFileAsync('git', ['remote', 'add', 'origin', 'https://git.internal.example/team/agent.git'], { cwd: selfHosted });
+    const unsupported = await gitService.gitRemote({ path: selfHosted });
+    expect(unsupported.link).toBeNull();
+    expect(unsupported.error).toContain('not a supported');
   });
 });

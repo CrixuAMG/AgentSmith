@@ -217,4 +217,73 @@ async function gitPush(project) {
   return { ok: result.code === 0, message };
 }
 
-module.exports = { gitStatus, gitDiff, gitLog, gitBranches, gitPush, parseStatus, parseLog, parseBranches };
+/**
+ * Maps a Git remote URL to a hosted repository. Only the host decides the provider, so
+ * a crafted remote cannot claim a provider the host does not serve. The URL may contain
+ * an embedded credential for HTTPS remotes; that part is dropped here and never stored.
+ */
+function parseRemoteUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  const trimmed = url.trim();
+  const scpLike = trimmed.match(/^(?:([^@/]+)@)?([^:/@]+):(?!\/)(.+)$/);
+  let host = null;
+  let path = null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return null;
+    }
+    host = parsed.hostname.toLowerCase();
+    path = decodeURIComponent(parsed.pathname);
+  } else if (scpLike) {
+    host = scpLike[2].toLowerCase();
+    path = scpLike[3];
+  } else {
+    return null;
+  }
+  const segments = (path ?? '').replace(/^\/+/, '').replace(/\.git$/i, '').split('/').filter(Boolean);
+  if (segments.length < 2) return null;
+  const providerId = host === 'github.com' || host.endsWith('.github.com')
+    ? 'github'
+    : host === 'gitlab.com' || host.includes('gitlab')
+      ? 'gitlab'
+      : null;
+  if (!providerId) return null;
+  return { providerId, host, owner: segments.slice(0, -1).join('/'), name: segments.at(-1) ?? '' };
+}
+
+async function defaultBranchOf(root) {
+  const head = await runGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], root);
+  const remoteBranch = head.code === 0 ? head.stdout.trim().split('/').slice(1).join('/') : '';
+  if (remoteBranch) return remoteBranch;
+  const current = await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], root);
+  const branch = current.code === 0 ? current.stdout.trim() : '';
+  return branch || 'main';
+}
+
+/**
+ * Detects the hosted repository of a project from its `origin` remote. This runs only
+ * local Git plumbing: nothing here contacts the provider.
+ */
+async function gitRemote(project, remote = 'origin') {
+  const { root, error } = await repositoryRoot(project);
+  if (!root) return { remote: null, link: null, error };
+  const result = await runGit(['remote', 'get-url', remote], root);
+  if (result.code !== 0) {
+    return { remote: null, link: null, error: 'This project has no Git remote to link a repository to.' };
+  }
+  const url = result.stdout.trim();
+  const parsed = parseRemoteUrl(url);
+  if (!parsed) {
+    return { remote, link: null, error: 'The Git remote is not a supported GitHub or GitLab repository.' };
+  }
+  return {
+    remote,
+    link: { ...parsed, defaultBranch: await defaultBranchOf(root) },
+    error: null,
+  };
+}
+
+module.exports = { gitStatus, gitDiff, gitLog, gitBranches, gitPush, gitRemote, parseRemoteUrl, parseStatus, parseLog, parseBranches };

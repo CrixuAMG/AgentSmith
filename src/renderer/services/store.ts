@@ -50,6 +50,7 @@ export const store = reactive({
   commitsLoading: false,
   commitsError: null as string | null,
   selectedBranch: null as string | null,
+  repositoryHandoff: null as { title: string; text: string; issueNumber: number; repository: string } | null,
 });
 
 const earlyProcessEvents = new Map<string, ExecutionEvent>();
@@ -198,6 +199,21 @@ export async function selectProject(projectId: string | null) {
   clearWorkspace();
 }
 
+/**
+ * Hands an issue prompt to Prompt Studio. The pending prompt is stored rather than
+ * passed as a component prop so it survives the navigation between the two pages.
+ */
+export function handoffIssuePrompt(handoff: { title: string; text: string; issueNumber: number; repository: string }) {
+  store.repositoryHandoff = handoff;
+  store.activeView = 'prompt-studio';
+}
+
+export function consumeRepositoryHandoff() {
+  const handoff = store.repositoryHandoff;
+  store.repositoryHandoff = null;
+  return handoff;
+}
+
 export function clearWorkspace() {
   store.tree = [];
   store.treeLoadedFor = null;
@@ -261,6 +277,7 @@ export function applyResource(key: ResourceKey, value: unknown) {
   if (key === 'guardrails') store.snapshot.guardrails = value as AppSnapshot['guardrails'];
   if (key === 'profiles') store.snapshot.profiles = value as AppSnapshot['profiles'];
   if (key === 'providerSettings') store.snapshot.providerSettings = value as AppSnapshot['providerSettings'];
+  if (key === 'vcsSettings') store.snapshot.vcsSettings = value as AppSnapshot['vcsSettings'];
   if (key === 'globalInstructions') store.snapshot.globalInstructions = String(value);
   if (key === 'providerInstructions') store.snapshot.providerInstructions = value as AppSnapshot['providerInstructions'];
   if (key === 'promptHistory') store.snapshot.promptHistory = value as AppSnapshot['promptHistory'];

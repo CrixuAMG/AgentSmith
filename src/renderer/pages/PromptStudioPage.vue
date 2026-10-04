@@ -6,9 +6,10 @@ import { composePrompt } from '@/shared/prompt-composer';
 import { renderMarkdown } from '@/shared/markdown';
 import { parseSuggestionIdeas, type ParsedSuggestionIdea } from '@/shared/suggestion-parser';
 import { composeSuggestionPrompt } from '@/shared/suggestion-composer';
+import { composeRepositoryContract, parseRepositoryCapabilities } from '@/shared/repositories';
 import type { FeatureSuggestion, Model, PromptComposition, PromptContextOptions, ProviderDiscovery, PromptHistoryEntry, Role } from '@/shared/types';
 import { api, onProcessEvent } from '../services/api';
-import { addPromptJob, refreshProviders, registerPromptJobExecution, selectedProject, selectProject, store } from '../services/store';
+import { addPromptJob, consumeRepositoryHandoff, refreshProviders, registerPromptJobExecution, selectedProject, selectProject, store } from '../services/store';
 import { PALETTE_EVENTS } from '../services/command-palette';
 
 const { t } = useI18n();
@@ -49,6 +50,9 @@ const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[
 const maxSuggestionOutputChars = 256 * 1024;
 const maxRewriteOutputChars = 256 * 1024;
 const gitDiffSelection = ref<{ path: string; staged: boolean } | null>(null);
+// A prompt handed over from the Issues page is consumed once, then cleared, so a later
+// visit to this page never silently restores an old issue.
+const handoffNote = ref<string | null>(null);
 const contexts = reactive<PromptContextOptions>({
   globalInstructions: true,
   providerInstructions: true,
@@ -111,6 +115,8 @@ const providerReadiness = computed(() => {
   return { label: discovery.installation.version ?? t('common.installed'), detail: `${model} · ${t('prompt.networkAdvisory')}`, ready: true };
 });
 const suggestionHtml = computed(() => renderMarkdown(suggestionOutput.value || t('prompt.suggesting')));
+const repositoryCapabilities = computed(() => parseRepositoryCapabilities(projectInstructionText.value));
+const repositoryWorkflow = computed(() => composeRepositoryContract(repositoryCapabilities.value, project.value?.repository ?? null));
 const composition = computed(() => composePrompt({
   project: project.value,
   task: task.value,
@@ -127,6 +133,7 @@ const composition = computed(() => composePrompt({
   packageJson: packageJsonText.value,
   gitStatus: gitStatusText.value,
   gitDiff: gitDiffText.value,
+  repositoryWorkflow: repositoryWorkflow.value,
   selectedFiles: selectedFiles.value,
   contexts,
   contextPaths: contextPaths.value,
@@ -400,6 +407,15 @@ function setTask(value: string) {
   task.value = value;
 }
 
+function applyIssueHandoff() {
+  const handoff = consumeRepositoryHandoff();
+  if (!handoff) return;
+  task.value = handoff.text;
+  handoffNote.value = handoff.issueNumber
+    ? `${t('prompt.issueHandoff', { number: handoff.issueNumber, repository: handoff.repository })}`
+    : null;
+}
+
 async function generateSuggestion() {
   if (!project.value || suggestionBusy.value) return;
   suggestionBusy.value = true;
@@ -491,6 +507,7 @@ function acceptSelectedSuggestions() {
 }
 
 watch(project, () => { void loadContext(); });
+watch(() => store.repositoryHandoff, (handoff) => { if (handoff) applyIssueHandoff(); });
 watch(() => store.selectedFilePath, () => { if (store.selectedFilePath) contexts.selectedFiles = true; });
 watch(() => store.promptFiles.length, () => { if (store.promptFiles.length) contexts.selectedFiles = true; });
 watch(() => contexts.gitDiff, async (enabled) => {
@@ -520,6 +537,7 @@ onMounted(async () => {
   window.addEventListener(PALETTE_EVENTS.refreshProviders, handlePaletteEvent);
   window.addEventListener(PALETTE_EVENTS.executePrompt, handlePaletteEvent);
   await Promise.all([loadProviders(), loadContext()]);
+  applyIssueHandoff();
   removeProcessListener = onProcessEvent(handleProcessEvent);
 });
 onUnmounted(() => {
@@ -559,7 +577,7 @@ onUnmounted(() => {
         </div>
 
         <div class="prompt-composer-area">
-          <section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="rewriting || suggestionBusy || !task.trim()" @click="rewritePrompt">{{ rewriting ? t('prompt.rewriting') : t('prompt.rewrite') }}</button><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy || rewriting" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section>
+          <section class="task-editor"><div class="prompt-card-heading"><span class="eyebrow">{{ t('prompt.task') }}</span><span class="mono">INPUT</span></div><div v-if="handoffNote" class="toolbar-status"><span class="status-dot"></span>{{ handoffNote }}</div><div v-if="repositoryWorkflow" class="toolbar-status"><span class="status-dot"></span>{{ t('prompt.repositoryContractActive') }}</div><textarea :value="task" :placeholder="t('prompt.taskPlaceholder')" @input="setTask(($event.target as HTMLTextAreaElement).value)"></textarea><div class="task-footer"><span class="mono">{{ task.length }} chars</span><div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="rewriting || suggestionBusy || !task.trim()" @click="rewritePrompt">{{ rewriting ? t('prompt.rewriting') : t('prompt.rewrite') }}</button><button class="secondary-button suggestion-trigger" type="button" :disabled="suggestionBusy || rewriting" @click="generateSuggestion">{{ suggestionBusy ? t('prompt.suggesting') : t('prompt.suggest') }}</button><span v-if="loadingContext" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div></section>
 
           <section v-if="suggestion" class="suggestion-panel"><div class="prompt-card-heading"><div><span class="eyebrow">{{ t('prompt.suggestion') }} / {{ suggestion.angleLabel }}</span><p>{{ t('prompt.suggestionDetail') }}</p></div><span class="mono">{{ selectedSuggestionIdeas.length }}/{{ suggestionIdeas.length || '...' }}</span></div><div class="suggestion-provider-meta"><span>{{ selectedProviderId }} · {{ selectedModelId ?? t('profiles.noModel') }}</span><span>{{ t('prompt.networkAdvisory') }}</span></div><div class="suggestion-summary"><span v-if="suggestionBusy"><span class="loading-pulse"></span>{{ t('prompt.suggesting') }}</span><span v-else>{{ suggestionIdeas.length }} {{ t('prompt.suggestion') }}</span><button v-if="!suggestionBusy" class="secondary-button" type="button" @click="suggestionModalOpen = true">{{ t('prompt.openSuggestions') }}</button></div><div class="suggestion-meta"><span class="mono truncate">{{ suggestionPath ?? t('prompt.suggesting') }}</span><span v-if="suggestionAccepted" class="status-pill">{{ t('prompt.suggestionAccepted') }}</span></div><div class="suggestion-actions"><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="generateSuggestion">{{ t('prompt.anotherSuggestion') }} <span>↻</span></button><button class="secondary-button" type="button" :disabled="suggestionBusy" @click="suggestionModalOpen = true">{{ t('prompt.openSuggestions') }}</button></div></section>
 
