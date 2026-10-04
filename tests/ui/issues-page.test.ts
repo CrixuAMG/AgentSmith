@@ -18,6 +18,7 @@ let linked = true;
 let instructions = '## Repository integration\n\n- issues: allow\n- branches: allow\n';
 let issues: RepositoryIssue[] = [];
 let issueError: string | null = null;
+let processListener: ((event: { executionId: string; kind: string; text?: string }) => void) | null = null;
 
 const issue: RepositoryIssue = {
   number: 42,
@@ -50,6 +51,23 @@ vi.mock('@/renderer/services/api', () => ({
     listInstructions: async () => [{ relativePath: 'AGENTS.md', scope: 'project', title: 'AGENTS.md' }],
     readInstruction: async () => instructions,
     listRepositoryIssues: async () => ({ ok: issueError === null, repository: 'example/agent', issues, error: issueError }),
+    discoverProviders: async () => [{ installation: { providerId: 'opencode', installed: true, executable: 'opencode', version: '1.0.0', error: null }, capabilities: { supportsModelDiscovery: true, supportsReasoningEffort: true, supportsStreaming: true, supportsInteractiveTerminal: true, supportsPermissionModes: true, supportsSandboxing: false, supportsWorkingDirectory: true }, models: [], modelDiscoveryAvailable: true, note: null, executionSupported: true }],
+    scanProject: async () => [{ name: 'README.md', relativePath: 'README.md', kind: 'file' }],
+    gitStatus: async () => ({ isRepository: true, branch: 'main', ahead: 0, behind: 0, changes: [], error: null }),
+    readFile: async () => ({ relativePath: 'README.md', content: '# Example', language: 'markdown', lineCount: 1, size: 9 }),
+    startProcess: async () => {
+      const executionId = 'analysis-exec-1';
+      queueMicrotask(() => {
+        processListener?.({ executionId, kind: 'started' });
+        processListener?.({ executionId, kind: 'stdout', text: JSON.stringify([{ title: 'Add retry handling', body: 'Retry transient failures.', labels: ['bug'] }]) });
+        processListener?.({ executionId, kind: 'completed' });
+      });
+      return { executionId, command: 'opencode run <prompt>' };
+    },
+    onProcessEvent: (callback: typeof processListener) => {
+      processListener = callback;
+      return () => { processListener = null; };
+    },
     createRepositoryIssue: async (_project: unknown, draft: unknown) => {
       calls.created.push(draft);
       return { ok: true, issue: { ...issue, ...(draft as RepositoryIssue) }, error: null };
@@ -100,6 +118,7 @@ describe('issues page', () => {
     instructions = '## Repository integration\n\n- issues: allow\n- branches: allow\n';
     issues = [{ ...issue }];
     issueError = null;
+    processListener = null;
     store.snapshot = snapshot();
     store.activeView = 'issues';
     store.repositoryHandoff = null;
@@ -142,6 +161,20 @@ describe('issues page', () => {
 
     expect(calls.created).toEqual([{ title: 'Add a retry policy', body: 'Retry with backoff.', labels: [] }]);
     expect(wrapper.find('.global-alert').text()).toContain('#42');
+  });
+
+  it('analyzes the project, lets the user review drafts, and creates the selected issue', async () => {
+    const wrapper = await mountPage();
+    await wrapper.findAll('button').find((button) => button.text().includes('Analyze current status'))?.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('.issues-proposal-item')).toHaveLength(1);
+    expect(wrapper.find('.issues-proposal-item').text()).toContain('Add retry handling');
+    await wrapper.find('.issues-analysis-actions .primary-button').trigger('click');
+    await flushPromises();
+
+    expect(calls.created).toContainEqual({ title: 'Add retry handling', body: 'Retry transient failures.', labels: ['bug'] });
+    expect(wrapper.find('.issues-created-list').text()).toContain('#42');
   });
 
   it('refuses an issue without a title before calling the provider', async () => {

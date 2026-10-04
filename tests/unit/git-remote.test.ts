@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parseRemoteUrl } = require('../../electron/git-service.cjs') as {
-  parseRemoteUrl: (url: string) => { providerId: string; host: string; owner: string; name: string } | null;
+  parseRemoteUrl: (url: string | null) => { providerId: string; host: string; owner: string; name: string } | null;
 };
 
 describe('Git remote parsing', () => {

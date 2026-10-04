@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import { composeIssueAuditPrompt } from '@/shared/issue-audit';
 import { composeIssuePrompt } from '@/shared/issue-composer';
 import { issueBranchName, parseRepositoryCapabilities } from '@/shared/repositories';
-import type { IssueDraft, RepositoryIssue, RepositoryLink, VcsProviderDiscovery } from '@/shared/types';
+import { parseIssueProposals, type ParsedIssueProposal } from '@/shared/issue-proposal-parser';
+import type { IssueDraft, ProjectFileNode, ProviderDiscovery, RepositoryIssue, RepositoryLink, VcsProviderDiscovery } from '@/shared/types';
 import { api } from '../services/api';
-import { handoffIssuePrompt, persist, selectedProject, store as rawStore } from '../services/store';
+import { activeGuardrails, addPromptJob, handoffIssuePrompt, persist, registerPromptJobExecution, selectedProject, store as rawStore } from '../services/store';
 
 const { t } = useI18n();
 const store = rawStore as typeof rawStore & { snapshot: NonNullable<typeof rawStore.snapshot> };
@@ -26,6 +28,21 @@ const selectedIssue = ref<RepositoryIssue | null>(null);
 const draft = ref<IssueDraft>({ title: '', body: '', labels: [] });
 const draftOpen = ref(false);
 const draftError = ref<string | null>(null);
+const analysisProviders = ref<ProviderDiscovery[]>([]);
+const analysisProviderId = ref(rawStore.activeProviderId);
+const analysisBusy = ref(false);
+const analysisError = ref<string | null>(null);
+const analysisOutput = ref('');
+const analysisPrompt = ref('');
+const analysisExecutionId = ref<string | null>(null);
+const analysisJobId = ref<string | null>(null);
+const analysisProposals = ref<ParsedIssueProposal[]>([]);
+const selectedProposalIds = ref<string[]>([]);
+const creatingProposals = ref(false);
+const createdIssues = ref<RepositoryIssue[]>([]);
+const creationErrors = ref<string[]>([]);
+const maxAnalysisOutputChars = 256 * 1024;
+const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 
 const link = computed<RepositoryLink | null>(() => project.value?.repository ?? null);
 const capabilities = computed(() => parseRepositoryCapabilities(instructionText.value));
@@ -37,9 +54,96 @@ const labelsText = computed({
 });
 const canWrite = computed(() => Boolean(link.value) && credentialState.value?.configured === true);
 const openCount = computed(() => issues.value.filter((issue) => issue.state === 'open').length);
+const analysisProvider = computed(() => analysisProviders.value.find((provider) => provider.installation.providerId === analysisProviderId.value) ?? null);
+const analysisReady = computed(() => Boolean(analysisProvider.value?.installation.installed && analysisProvider.value.executionSupported !== false));
+const analysisModelId = computed(() => {
+  const profile = store.snapshot?.profiles.find((item) => item.id === store.snapshot?.config.activeProfileId);
+  return profile?.providerId === analysisProviderId.value ? profile.modelId : null;
+});
+const analysisVariant = computed(() => {
+  const profile = store.snapshot?.profiles.find((item) => item.id === store.snapshot?.config.activeProfileId);
+  return profile?.providerId === analysisProviderId.value ? { ...profile.variant } : {};
+});
+const selectedProposalCount = computed(() => selectedProposalIds.value.length);
+const analysisStatus = computed(() => {
+  if (!analysisProvider.value) return t('issues.providerUnavailable');
+  if (!analysisProvider.value.installation.installed || analysisProvider.value.executionSupported === false) {
+    return t('issues.providerUnavailable');
+  }
+  return `${analysisProvider.value.installation.providerId} · ${analysisProvider.value.installation.version ?? t('common.installed')}`;
+});
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatAuditTree(nodes: ProjectFileNode[], depth = 0): string {
+  return nodes.flatMap((node) => {
+    const line = `${'  '.repeat(depth)}${node.kind === 'directory' ? '[dir] ' : ''}${node.relativePath}`;
+    return node.children ? [line, formatAuditTree(node.children, depth + 1)] : [line];
+  }).join('\n');
+}
+
+function hasProjectFile(relativePath: string, nodes: ProjectFileNode[]): boolean {
+  return nodes.some((node) => node.relativePath === relativePath || (node.children ? hasProjectFile(relativePath, node.children) : false));
+}
+
+async function loadAnalysisProviders() {
+  if (typeof api.discoverProviders !== 'function') return;
+  try {
+    analysisProviders.value = await api.discoverProviders();
+    const current = analysisProviders.value.find((provider) => provider.installation.providerId === rawStore.activeProviderId);
+    const preferred = (current?.installation.installed && current.executionSupported !== false ? current : null)
+      ?? analysisProviders.value.find((provider) => provider.installation.installed && provider.executionSupported !== false)
+      ?? analysisProviders.value[0];
+    if (preferred && !analysisProviders.value.some((provider) => provider.installation.providerId === analysisProviderId.value)) {
+      analysisProviderId.value = preferred.installation.providerId;
+    }
+  } catch (error) {
+    analysisError.value = messageOf(error);
+  }
+}
+
+async function readAuditContext(target: NonNullable<typeof project.value>) {
+  const guardrails = activeGuardrails();
+  const [tree, git, instructionFiles] = await Promise.all([
+    api.scanProject(target, { showHidden: false }),
+    api.gitStatus(target),
+    api.listInstructions(target),
+  ]);
+  const instructionContents = await Promise.all(instructionFiles
+    .filter((file) => file.scope !== 'global')
+    .map(async (file) => {
+      try {
+        return `### ${file.relativePath}\n${await api.readInstruction(target, file.relativePath, guardrails)}`;
+      } catch {
+        return '';
+      }
+    }));
+  const readOptional = async (relativePath: string) => {
+    if (!hasProjectFile(relativePath, tree)) return '';
+    try {
+      return (await api.readFile(target, relativePath, guardrails)).content;
+    } catch {
+      return '';
+    }
+  };
+  const [readme, packageJson, composerJson] = await Promise.all([
+    readOptional('README.md'),
+    readOptional('package.json'),
+    readOptional('composer.json'),
+  ]);
+  const changes = git.changes.length
+    ? git.changes.map((change) => `${change.kind}: ${change.path}`).join('\n')
+    : 'clean';
+  return {
+    projectStructure: formatAuditTree(tree) || '(empty project)',
+    gitStatus: git.error ?? `branch: ${git.branch ?? 'unknown'}\n${changes}`,
+    readme,
+    packageJson,
+    composerJson,
+    instructions: instructionContents.filter(Boolean).join('\n\n'),
+  };
 }
 
 async function discover() {
@@ -159,6 +263,142 @@ async function loadIssues() {
   }
 }
 
+async function analyzeCurrentProject() {
+  const targetProject = project.value;
+  const targetLink = link.value;
+  if (!targetProject || !targetLink) {
+    analysisError.value = t('issues.noRepository');
+    return;
+  }
+  if (!analysisReady.value) {
+    analysisError.value = analysisStatus.value;
+    return;
+  }
+  analysisBusy.value = true;
+  analysisError.value = null;
+  analysisOutput.value = '';
+  analysisPrompt.value = '';
+  analysisExecutionId.value = null;
+  analysisProposals.value = [];
+  selectedProposalIds.value = [];
+  createdIssues.value = [];
+  creationErrors.value = [];
+  try {
+    const context = await readAuditContext(targetProject);
+    const composed = composeIssueAuditPrompt({ project: targetProject, link: targetLink, ...context });
+    analysisPrompt.value = composed.text;
+    const jobId = `issue-analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const guardrails = activeGuardrails();
+    addPromptJob({
+      id: jobId,
+      projectId: targetProject.id,
+      historyEntryId: null,
+      task: composed.title,
+      state: 'queued',
+      executionId: null,
+      command: null,
+      output: [],
+      exitCode: null,
+      providerId: analysisProviderId.value,
+      modelId: analysisModelId.value,
+      purpose: 'issue-analysis',
+    });
+    const result = await api.startProcess({
+      jobId,
+      projectId: targetProject.id,
+      task: composed.title,
+      purpose: 'issue-analysis',
+      providerId: analysisProviderId.value,
+      modelId: analysisModelId.value,
+      prompt: composed.text,
+      projectPath: targetProject.path,
+      variant: analysisVariant.value,
+      guardrailProfile: guardrails,
+      guardrailProfileId: guardrails?.id ?? null,
+    });
+    analysisExecutionId.value = result.executionId;
+    registerPromptJobExecution(jobId, result.executionId);
+  } catch (error) {
+    analysisBusy.value = false;
+    analysisError.value = messageOf(error);
+  }
+}
+
+function handleAnalysisEvent(event: { executionId: string; kind: string; text?: string }) {
+  if (!analysisBusy.value) return;
+  // A queued process event can arrive before startProcess resolves with the ID. The
+  // event itself is the authoritative ID for this analysis run.
+  if (!analysisExecutionId.value) analysisExecutionId.value = event.executionId;
+  if (event.executionId !== analysisExecutionId.value) return;
+  if (event.kind === 'stdout' || event.kind === 'stderr') {
+    const nextOutput = `${analysisOutput.value}${(event.text ?? '').replace(ansiEscapePattern, '')}`;
+    analysisOutput.value = nextOutput.length > maxAnalysisOutputChars
+      ? `${nextOutput.slice(0, maxAnalysisOutputChars)}\n[AgentSmith truncated further analysis output.]`
+      : nextOutput;
+  }
+  if (event.kind === 'completed') {
+    analysisBusy.value = false;
+    analysisExecutionId.value = null;
+    const parsed = parseIssueProposals(analysisOutput.value);
+    analysisProposals.value = parsed.proposals;
+    selectedProposalIds.value = parsed.proposals.map((proposal) => proposal.id);
+    analysisError.value = parsed.error;
+    if (parsed.proposals.length) status.value = t('issues.analysisReady', { count: parsed.proposals.length });
+  }
+  if (event.kind === 'failed' || event.kind === 'cancelled') {
+    analysisBusy.value = false;
+    analysisExecutionId.value = null;
+    analysisError.value = event.text ?? t('issues.analysisFailed');
+  }
+}
+
+async function cancelAnalysis() {
+  if (!analysisExecutionId.value) return;
+  await api.cancelProcess(analysisExecutionId.value);
+}
+
+async function createSelectedIssues() {
+  const targetProject = project.value;
+  if (!targetProject || !canWrite.value) {
+    analysisError.value = t('issues.credentialRequired');
+    return;
+  }
+  const selected = analysisProposals.value.filter((proposal) => selectedProposalIds.value.includes(proposal.id));
+  if (!selected.length) {
+    analysisError.value = t('issues.selectProposal');
+    return;
+  }
+  creatingProposals.value = true;
+  analysisError.value = null;
+  creationErrors.value = [];
+  createdIssues.value = [];
+  try {
+    for (const proposal of selected) {
+      try {
+        const result = await api.createRepositoryIssue(targetProject, {
+          title: proposal.title,
+          body: proposal.body,
+          labels: proposal.labels,
+        });
+        if (result.ok && result.issue) createdIssues.value.push(result.issue);
+        else creationErrors.value.push(result.error ?? t('issues.saveFailed'));
+      } catch (error) {
+        creationErrors.value.push(messageOf(error));
+      }
+    }
+    selectedProposalIds.value = selected.filter((proposal) => !createdIssues.value.some((issue) => issue.title === proposal.title)).map((proposal) => proposal.id);
+    if (createdIssues.value.length) {
+      status.value = t('issues.batchCreated', { count: createdIssues.value.length });
+      await loadIssues();
+    }
+    if (creationErrors.value.length) {
+      analysisError.value = t('issues.batchCreatePartial', { count: creationErrors.value.length });
+    }
+  } finally {
+    creatingProposals.value = false;
+  }
+}
+
 function openNewIssue() {
   draft.value = { title: '', body: '', labels: [] };
   selectedIssue.value = null;
@@ -241,20 +481,30 @@ watch(project, async () => {
   draftOpen.value = false;
   status.value = null;
   localError.value = null;
+  analysisError.value = null;
+  analysisOutput.value = '';
+  analysisPrompt.value = '';
+  analysisProposals.value = [];
+  selectedProposalIds.value = [];
+  createdIssues.value = [];
+  creationErrors.value = [];
   issues.value = [];
   await loadInstructions();
   await loadIssues();
 });
 watch(stateFilter, () => { void loadIssues(); });
 
+let removeProcessListener: (() => void) | null = null;
 onMounted(async () => {
-  await Promise.all([discover(), loadInstructions(), loadIssues()]);
+  if (typeof api.onProcessEvent === 'function') removeProcessListener = api.onProcessEvent(handleAnalysisEvent);
+  await Promise.all([discover(), loadInstructions(), loadIssues(), loadAnalysisProviders()]);
 });
+onUnmounted(() => removeProcessListener?.());
 </script>
 
 <template>
   <div class="issues-page">
-    <div class="page-heading"><div><span class="eyebrow">{{ t('issues.eyebrow') }}</span><h1>{{ t('issues.title') }}</h1><p class="lead">{{ t('issues.intro') }}</p></div><button class="primary-button" type="button" :disabled="!canWrite || busy" @click="openNewIssue">{{ t('issues.newIssue') }} <span>+</span></button></div>
+    <div class="page-heading"><div><span class="eyebrow">{{ t('issues.eyebrow') }}</span><h1>{{ t('issues.title') }}</h1><p class="lead">{{ t('issues.intro') }}</p></div><div class="heading-actions"><button class="secondary-button" type="button" :disabled="!link || !analysisReady || analysisBusy || busy" @click="analyzeCurrentProject">{{ analysisBusy ? t('issues.analyzing') : t('issues.analyzeProject') }} <span v-if="!analysisBusy">⌁</span></button><button class="primary-button" type="button" :disabled="!canWrite || busy" @click="openNewIssue">{{ t('issues.newIssue') }} <span>+</span></button></div></div>
 
     <div v-if="localError" class="inline-error" role="alert">{{ localError }}</div>
     <div v-if="status" class="global-alert" role="status">{{ status }}</div>
@@ -297,6 +547,29 @@ onMounted(async () => {
           <p v-if="capabilities.mergeRequestDenied" class="toolbar-status"><span class="status-dot"></span>{{ t('issues.mergeRequestRefused') }}</p>
         </section>
       </div>
+
+      <section v-if="link" class="issues-analysis-panel">
+        <div class="prompt-card-heading"><div><span class="eyebrow">{{ t('issues.analysisEyebrow') }}</span><p>{{ t('issues.analysisDetail') }}</p></div><span class="mono">{{ analysisProviderId }}</span></div>
+        <div class="issues-analysis-toolbar">
+          <label class="form-field"><span>{{ t('issues.analysisProvider') }}</span><select v-model="analysisProviderId" :disabled="analysisBusy || creatingProposals"><option v-for="provider in analysisProviders" :key="provider.installation.providerId" :value="provider.installation.providerId">{{ provider.installation.providerId }}</option></select></label>
+          <div class="issues-analysis-status"><span class="eyebrow">{{ t('issues.analysisStatus') }}</span><span class="mono">{{ analysisStatus }}</span></div>
+          <div class="task-footer-actions"><button v-if="analysisBusy" class="quiet-button" type="button" @click="cancelAnalysis">{{ t('issues.cancelAnalysis') }}</button><button v-else class="secondary-button" type="button" :disabled="!analysisReady || creatingProposals" @click="analyzeCurrentProject">{{ t('issues.analyzeProject') }} <span>⌁</span></button></div>
+        </div>
+        <p v-if="analysisProvider?.note" class="muted-copy">{{ analysisProvider.note }}</p>
+        <p v-if="analysisError" class="inline-error" role="alert">{{ analysisError }}</p>
+        <div v-if="analysisBusy" class="suggestion-progress"><span class="loading-pulse"></span><span>{{ t('issues.analyzing') }}</span></div>
+        <template v-if="analysisProposals.length">
+          <div class="issues-proposal-header"><span class="eyebrow">{{ t('issues.proposals') }}</span><span class="mono">{{ selectedProposalCount }}/{{ analysisProposals.length }}</span></div>
+          <div class="issues-proposal-list">
+            <label v-for="proposal in analysisProposals" :key="proposal.id" class="issues-proposal-item"><input v-model="selectedProposalIds" type="checkbox" :value="proposal.id" :disabled="creatingProposals"><span><strong>{{ proposal.title }}</strong><small>{{ proposal.body }}</small><span v-if="proposal.labels.length" class="model-tags"><span v-for="label in proposal.labels" :key="label" class="model-tag">{{ label }}</span></span></span></label>
+          </div>
+          <div class="issues-analysis-actions"><span class="muted-copy">{{ canWrite ? t('issues.createDetail') : t('issues.credentialRequired') }}</span><button class="primary-button" type="button" :disabled="creatingProposals || !selectedProposalCount || !canWrite" @click="createSelectedIssues">{{ creatingProposals ? t('issues.creating') : t('issues.createSelected', { count: selectedProposalCount }) }} <span>↗</span></button></div>
+        </template>
+        <div v-if="createdIssues.length" class="issues-created-list"><span class="eyebrow">{{ t('issues.createdList') }}</span><span v-for="issue in createdIssues" :key="issue.number" class="mono">#{{ issue.number }} {{ issue.title }}</span></div>
+        <div v-if="creationErrors.length" class="issues-creation-errors" role="alert"><span v-for="(error, index) in creationErrors" :key="`${index}-${error}`">{{ error }}</span></div>
+        <details v-if="analysisPrompt" class="suggestion-source"><summary>{{ t('issues.viewAnalysisPrompt') }}</summary><pre class="suggestion-text">{{ analysisPrompt }}</pre></details>
+        <details v-if="analysisOutput && !analysisBusy" class="suggestion-source"><summary>{{ t('issues.viewAnalysisOutput') }}</summary><pre class="suggestion-text">{{ analysisOutput }}</pre></details>
+      </section>
 
       <section class="issues-list-panel">
         <div class="prompt-card-heading"><div><span class="eyebrow">{{ t('issues.listTitle') }}</span><p>{{ t('issues.listDetail', { open: openCount, total: issues.length }) }}</p></div><div class="task-footer-actions"><select v-model="stateFilter" :aria-label="t('issues.stateFilter')"><option value="open">{{ t('issues.stateOpen') }}</option><option value="closed">{{ t('issues.stateClosed') }}</option><option value="all">{{ t('issues.stateAll') }}</option></select><span v-if="issuesLoading" class="toolbar-status"><span class="loading-pulse"></span>{{ t('common.loading') }}</span></div></div>

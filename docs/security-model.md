@@ -42,6 +42,15 @@ The user-selected project is untrusted input. Project files, Git output, provide
 * Output is streamed to the current session but not persisted by default. Diagnostics redact obvious token/key patterns and never log file contents. A generated feature suggestion is an exception: it is written to the local suggestions directory by design, never transmitted by AgentSmith itself, and never sent to a provider unless the user accepts it and confirms execution.
 * Cancellation sends `SIGTERM`, then escalates only after a short grace period.
 
+## Hosted Repository Rules
+
+* GitHub credentials are accepted only by the main-process VCS service, held in memory for the session, and never written to configuration or returned through IPC.
+* `AGENTSMITH_GITHUB_TOKEN` is available to the VCS service but is removed from the environment of every AI provider child process.
+* Repository links are derived from the local Git remote and validated again at the IPC boundary. GitHub issue paths, titles, bodies, labels, and issue states use explicit bounds and allowlists.
+* Provider issue analysis is untrusted output. It must parse as a bounded JSON issue list; prose, malformed objects, duplicate titles, and oversized fields are rejected or skipped before a write.
+* Creating an issue requires an explicit user selection in the Issues page. Each selected draft is posted through the main-process GitHub client, and the result must contain a readable GitHub issue before the UI reports success.
+* AgentSmith does not expose merge, force-push, reset, or arbitrary hosted-repository operations. Additional providers can implement the same narrow contract without receiving GitHub credentials.
+
 ## Guardrail Layers
 
 1. **Prompt-level**: instructions included in the composed prompt; advisory only.

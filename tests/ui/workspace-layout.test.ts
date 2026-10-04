@@ -21,6 +21,8 @@ vi.mock('@/renderer/services/api', () => ({
     scanProject: async () => [],
     gitStatus: async () => ({ isRepository: true, branch: 'main', ahead: 0, behind: 0, changes: [], error: null }),
     gitDiff: async () => '',
+    gitBranches: async () => ({ isRepository: true, current: 'main', branches: [], error: null }),
+    gitLog: async () => ({ isRepository: true, branch: 'main', commits: [], error: null }),
      listInstructions: async () => workspaceInstructions.files,
      readInstruction: async (_project: unknown, relativePath: string) => relativePath === 'AGENTS.md' ? '# Original' : '# Other',
      writeInstruction: async (...args: unknown[]) => { workspaceInstructions.writes.push(args); },
@@ -70,6 +72,8 @@ describe('workspace layout', () => {
     store.instructionDirty = false;
     store.instructionDraft = '';
     store.instructionOriginalContent = '';
+    store.selectedInstructionPath = null;
+    store.instructionLoading = false;
     workspaceInstructions.files = [];
     workspaceInstructions.writes = [];
   });

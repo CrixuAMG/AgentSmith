@@ -117,7 +117,7 @@ describe('configuration storage', () => {
       .rejects.toThrow('Invalid projects resource');
     await expect(configStore.saveResource('projects', [{ ...project, repository: { providerId: 'bitbucket', host: 'bitbucket.org', owner: 'example', name: 'agent', defaultBranch: 'main' } }]))
       .rejects.toThrow('Invalid projects resource');
-    expect((await configStore.loadSnapshot()).projects[0].repository.name).toBe('agent');
+    expect((await configStore.loadSnapshot()).projects[0].repository?.name).toBe('agent');
   });
 
   it('does not quarantine or overwrite future schema versions', async () => {

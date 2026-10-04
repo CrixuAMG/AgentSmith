@@ -241,7 +241,7 @@ function validPromptJob(value) {
     && (value.exitCode === null || (typeof value.exitCode === 'number' && Number.isFinite(value.exitCode)))
     && (value.providerId === undefined || isString(value.providerId))
     && (value.modelId === undefined || value.modelId === null || isString(value.modelId))
-    && (value.purpose === undefined || ['task', 'suggestion'].includes(value.purpose))
+     && (value.purpose === undefined || ['task', 'suggestion', 'issue-analysis'].includes(value.purpose))
     && (value.outputBytes === undefined || (typeof value.outputBytes === 'number' && Number.isFinite(value.outputBytes)))
     && (value.outputTruncated === undefined || isBoolean(value.outputTruncated))
     && (value.error === undefined || value.error === null || isString(value.error))

@@ -3,12 +3,13 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs, hydrateJobs, listPromptJobs } = require('../../electron/process-service.cjs') as {
+const { evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs, hydrateJobs, listPromptJobs, providerEnvironment } = require('../../electron/process-service.cjs') as {
   evaluateExecutionGuardrails: (request: { prompt: string; guardrailProfile?: { rules: Array<Record<string, unknown>> } }) => void;
   closeProcessInput: (child: { stdin?: { end: () => void } | null }) => void;
   normalizeMaxConcurrentJobs: (value: unknown) => number;
   hydrateJobs: (records: Array<Record<string, unknown>>) => void;
   listPromptJobs: () => Array<Record<string, unknown>>;
+  providerEnvironment: (environment: Record<string, string>) => Record<string, string>;
 };
 
 describe('execution guardrails', () => {
@@ -29,6 +30,10 @@ describe('execution guardrails', () => {
     closeProcessInput({ stdin: { end } });
 
     expect(end).toHaveBeenCalledOnce();
+  });
+
+  it('keeps hosted repository credentials out of provider environments', () => {
+    expect(providerEnvironment({ AGENTSMITH_GITHUB_TOKEN: 'secret', AGENTSMITH_GITLAB_TOKEN: 'secret', PATH: '/bin' })).toEqual({ PATH: '/bin' });
   });
 
   it('normalizes the configured concurrency limit to a safe range', () => {

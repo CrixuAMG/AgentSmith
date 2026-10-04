@@ -6,7 +6,7 @@ const vcs = require('../../electron/vcs-service.cjs') as {
   apiBaseFor: (link: { providerId: string; host: string }) => string;
   credentialState: (providerId: string) => { configured: boolean; source: string };
   createRepositoryIssue: (project: unknown, draft: unknown) => Promise<{ ok: boolean; issue: unknown; error: string | null }>;
-  discoverVcsProviders: () => Promise<Array<{ installation: { connected: boolean; error: string | null }; capabilities: { supportsMerge: boolean }; credential: { configured: boolean } }>>;
+  discoverVcsProviders: () => Promise<Array<{ installation: { providerId: string; connected: boolean; error: string | null }; capabilities: { supportsMerge: boolean }; credential: { configured: boolean } }>>;
   listRepositoryIssues: (project: unknown, options: unknown) => Promise<{ ok: boolean; issues: unknown[]; error: string | null }>;
   setVcsCredential: (providerId: string, token: string | null) => { configured: boolean; source: string };
   updateRepositoryIssue: (project: unknown, number: number, patch: unknown) => Promise<{ ok: boolean; error: string | null }>;
@@ -50,6 +50,10 @@ describe('session credentials', () => {
     expect(vcs.setVcsCredential('github', null)).toEqual({ providerId: 'github', configured: false, source: 'none' });
   });
 
+  it('does not treat a whitespace-only token as configured', () => {
+    expect(vcs.setVcsCredential('github', '   ')).toEqual({ providerId: 'github', configured: false, source: 'none' });
+  });
+
   it('describes provider capability without contacting the provider when unconfigured', async () => {
     delete process.env.AGENTSMITH_GITHUB_TOKEN;
     const [discovery] = await vcs.discoverVcsProviders();
@@ -87,6 +91,34 @@ describe('issue reads and writes', () => {
     expect(vcs.validateDraft({ title: 'A'.repeat(300), body: '' }).error).toContain('256');
     expect(vcs.validateDraft({ title: 'ok', body: 'x'.repeat(70000) }).error).toContain('65536');
     expect(vcs.validateDraft({ title: ' ok ', body: '', labels: ['bug', '', '  ', 42] })).toEqual({ error: null, draft: { title: 'ok', body: '', labels: ['bug'] } });
+  });
+
+  it('posts a validated issue to GitHub and maps the created issue', async () => {
+    const originalFetch = global.fetch;
+    vcs.setVcsCredential('github', 'ghp_testvalue');
+    global.fetch = async (input, init) => {
+      expect(String(input)).toBe('https://api.github.com/repos/example/agent/issues');
+      expect((init?.headers as Record<string, string>).authorization).toBe('Bearer ghp_testvalue');
+      expect(JSON.parse(String(init?.body))).toEqual({ title: 'Add retry handling', body: 'Document the failure.', labels: ['bug'] });
+      return new Response(JSON.stringify({
+        number: 43,
+        title: 'Add retry handling',
+        body: 'Document the failure.',
+        state: 'open',
+        html_url: 'https://github.com/example/agent/issues/43',
+        user: { login: 'octocat' },
+        labels: [{ name: 'bug' }],
+        comments: 0,
+        created_at: '2026-10-04T00:00:00.000Z',
+        updated_at: '2026-10-04T00:00:00.000Z',
+      }), { status: 201 });
+    };
+    try {
+      const result = await vcs.createRepositoryIssue(project, { title: 'Add retry handling', body: 'Document the failure.', labels: ['bug'] });
+      expect(result).toMatchObject({ ok: true, issue: { number: 43, title: 'Add retry handling', labels: ['bug'] }, error: null });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('rejects an issue patch that reaches outside an issue', async () => {

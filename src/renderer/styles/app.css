@@ -631,6 +631,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 .issues-connection-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.issues-analysis-panel { display: grid; gap: 14px; margin-top: 10px; padding: 16px; border: 1px solid rgba(140, 230, 163, .18); background: linear-gradient(145deg, var(--green-dim), var(--panel) 58%); }
+.issues-analysis-panel > .prompt-card-heading { align-items: start; }
+.issues-analysis-panel .prompt-card-heading p { max-width: 640px; margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.5; }
+.issues-analysis-toolbar { display: flex; align-items: end; gap: 14px; }
+.issues-analysis-toolbar .form-field { width: min(250px, 100%); margin: 0; }
+.issues-analysis-toolbar .form-field select { width: 100%; min-height: 32px; padding: 0 8px; border: 1px solid var(--line); background: var(--bg-deep); color: var(--text); font-size: 11px; }
+.issues-analysis-status { display: grid; gap: 7px; min-width: 0; margin-right: auto; }
+.issues-analysis-status .mono { overflow: hidden; color: var(--text-soft); text-overflow: ellipsis; white-space: nowrap; }
+.issues-analysis-panel .muted-copy { margin: 0; }
+.issues-proposal-header { display: flex; align-items: center; justify-content: space-between; padding-top: 2px; border-top: 1px solid var(--line); }
+.issues-proposal-header .mono { color: var(--green); }
+.issues-proposal-list { display: grid; gap: 7px; max-height: 430px; overflow: auto; }
+.issues-proposal-item { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 11px; padding: 12px; border: 1px solid var(--line); background: rgba(8, 11, 10, .24); color: var(--text-soft); cursor: pointer; }
+.issues-proposal-item:hover, .issues-proposal-item:has(input:checked) { border-color: rgba(140, 230, 163, .35); background: var(--green-dim); color: var(--text); }
+.issues-proposal-item input { margin: 3px 0 0; accent-color: var(--green-strong); }
+.issues-proposal-item > span { display: grid; gap: 7px; min-width: 0; }
+.issues-proposal-item strong { color: var(--text); font-size: 12px; }
+.issues-proposal-item small { color: var(--text-soft); font: 10px/1.65 'DM Mono', monospace; overflow-wrap: anywhere; white-space: pre-line; }
+.issues-proposal-item .model-tags { margin-top: 0; }
+.issues-analysis-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 2px; }
+.issues-analysis-actions .muted-copy { max-width: 630px; }
+.issues-created-list, .issues-creation-errors { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--line); background: var(--bg-deep); }
+.issues-created-list .mono { color: var(--green); font-size: 10px; }
+.issues-creation-errors { border-color: rgba(237, 145, 137, .25); background: rgba(237, 145, 137, .08); color: var(--red); font-size: 10px; line-height: 1.5; }
 .issues-list-panel { margin-top: 10px; border: 1px solid var(--line); background: var(--panel); }
 .issues-list-panel > .prompt-card-heading { padding: 16px; border-bottom: 1px solid var(--line); }
 .issues-list-panel .resource-list-panel { border: 0; }
@@ -648,6 +672,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .resource-list-panel .resource-list-item.selected { display: grid; }
   .prompt-config-grid { grid-template-columns: 1fr; }
   .issues-connection-grid { grid-template-columns: 1fr; }
+  .issues-analysis-toolbar, .issues-analysis-actions { align-items: stretch; flex-direction: column; }
+  .issues-analysis-toolbar .form-field { width: 100%; }
   .history-settings { grid-template-columns: 1fr; }
   .execution-header { align-items: flex-start; flex-direction: column; }
   .execution-actions { width: 100%; flex-wrap: wrap; }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import PromptStudioPage from '@/renderer/pages/PromptStudioPage.vue';
 import i18n from '@/renderer/i18n';
@@ -9,6 +9,7 @@ import { store } from '@/renderer/services/store';
 import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 
 let projectInstructions = '## Repository integration\n\n- issues: allow\n- branches: allow\n- pull-requests: allow\n';
+const mountedWrappers: Array<{ unmount: () => void }> = [];
 
 vi.mock('@/renderer/services/api', () => ({
   api: {
@@ -33,7 +34,7 @@ function snapshot() {
       name: 'Example',
       path: '/tmp/example',
       lastOpenedAt: '2026-10-02T00:00:00.000Z',
-      repository: { providerId: 'github', host: 'github.com', owner: 'example', name: 'agent', defaultBranch: 'main' },
+       repository: { providerId: 'github' as const, host: 'github.com', owner: 'example', name: 'agent', defaultBranch: 'main' },
     }],
     goals: structuredClone(DEFAULT_GOALS),
     roles: structuredClone(DEFAULT_ROLES),
@@ -52,9 +53,14 @@ function snapshot() {
 
 async function mountStudio() {
   const wrapper = mount(PromptStudioPage, { global: { plugins: [i18n] } });
+  mountedWrappers.push(wrapper);
   await flushPromises();
   return wrapper;
 }
+
+afterEach(() => {
+  mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount());
+});
 
 describe('prompt studio repository workflow', () => {
   beforeEach(() => {

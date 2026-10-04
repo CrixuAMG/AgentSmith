@@ -18,6 +18,7 @@ const MAX_ISSUE_BODY_CHARS = 65536;
 const MAX_LABELS = 20;
 const ISSUE_STATE_FILTERS = new Set(['open', 'closed', 'all']);
 const PATCHABLE_FIELDS = new Set(['title', 'body', 'state', 'labels']);
+const CREDENTIAL_PROVIDERS = new Set(['github', 'gitlab']);
 
 /** providerId -> token, held in memory for the lifetime of the process only. */
 const sessionCredentials = new Map();
@@ -52,17 +53,24 @@ function credentialState(providerId) {
  * back to the renderer; the returned state only reports whether one is configured.
  */
 function setVcsCredential(providerId, token) {
+  if (!CREDENTIAL_PROVIDERS.has(providerId)) throw new Error(`The repository provider ${String(providerId)} is not supported.`);
   if (token === null || token === undefined || token === '') {
     sessionCredentials.delete(providerId);
     return credentialState(providerId);
   }
   if (typeof token !== 'string') throw new Error('The credential must be a string.');
-  sessionCredentials.set(providerId, token.trim());
+  const normalized = token.trim();
+  if (!normalized) {
+    sessionCredentials.delete(providerId);
+    return credentialState(providerId);
+  }
+  sessionCredentials.set(providerId, normalized);
   return credentialState(providerId);
 }
 
 function apiBaseFor(link) {
   if (link.providerId !== 'github') throw new Error(`The repository provider ${String(link.providerId)} is not implemented yet.`);
+  if (typeof link.host !== 'string' || !/^[A-Za-z0-9.-]+$/.test(link.host)) throw new Error('The repository host is not valid.');
   return link.host === 'github.com' ? 'https://api.github.com' : `https://${link.host}/api/v3`;
 }
 
@@ -75,8 +83,11 @@ function linkedRepository(project) {
   if (!link || typeof link !== 'object') return { link: null, error: 'This project is not linked to a repository yet.' };
   const { providerId, host, owner, name } = link;
   if (!providerCapabilities[providerId]) return { link: null, error: `The repository provider ${String(providerId)} is not implemented yet.` };
-  if (typeof host !== 'string' || !host || /[\s/\\]/.test(host)) return { link: null, error: 'The stored repository host is not valid.' };
+  if (typeof host !== 'string' || !host || !/^[A-Za-z0-9.-]+$/.test(host)) return { link: null, error: 'The stored repository host is not valid.' };
   if (typeof owner !== 'string' || !owner || typeof name !== 'string' || !name) return { link: null, error: 'The stored repository path is not valid.' };
+  if (providerId === 'github' && (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(name))) {
+    return { link: null, error: 'The stored GitHub repository path is not valid.' };
+  }
   return { link, error: null };
 }
 

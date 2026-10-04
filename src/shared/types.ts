@@ -464,7 +464,7 @@ export interface AgentExecutionRequest {
   contextManifest?: PromptContextManifest;
   jobId?: string;
   historyEntryId?: string | null;
-  purpose?: 'task' | 'suggestion';
+  purpose?: 'task' | 'suggestion' | 'issue-analysis';
   projectId?: string | null;
   task?: string;
 }
@@ -499,7 +499,7 @@ export interface PromptJob {
   exitCode: number | null;
   providerId?: string;
   modelId?: string | null;
-  purpose?: 'task' | 'suggestion';
+  purpose?: 'task' | 'suggestion' | 'issue-analysis';
   outputBytes?: number;
   outputTruncated?: boolean;
   error?: string | null;

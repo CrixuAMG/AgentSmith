@@ -1,6 +1,6 @@
 # AgentSmith
 
-AgentSmith is a local-first desktop command center for AI-assisted software development. It keeps projects, reusable roles, development goals, guardrails, instructions, prompt context, and provider execution in one transparent workspace.
+AgentSmith is a local-first desktop command center for AI-assisted software development. It keeps projects, reusable roles, development goals, guardrails, instructions, prompt context, provider execution, and explicit GitHub issue workflows in one transparent workspace.
 
 ## Development
 
@@ -35,6 +35,8 @@ Writes are versioned, validated, backed up, and performed through a temporary fi
 * Global, provider-scoped, project, and nested `AGENTS.md` discovery and atomic editing.
 * CRUD for reusable goals, roles, guardrail profiles, and agent profiles.
 * OpenCode and Codex provider adapters with capability reporting.
+* GitHub repository linking, session-only credential handling, issue browsing, and issue CRUD through the GitHub API.
+* Provider-assisted project status analysis that produces reviewable issue drafts; selected drafts can be explicitly created as real GitHub issues.
 * Deterministic Prompt Studio composition with section-by-section preview, provider instructions, standard manifest context, guarded multi-file selection, and copy support.
 * **Make a suggestion** on the task editor: a role-aware feature-proposal prompt that can be regenerated, accepted into the task, and reviewed before anything runs.
 * Explicit process confirmation, streaming stdout/stderr, exit status, and cancellation.
@@ -52,8 +54,14 @@ OpenCode is discovered from `PATH` and its installed `opencode models --verbose`
 
 The initial process allowlist is `opencode` and `codex`. Commands are built as argument arrays with `shell: false` and run in the selected project root. AgentSmith never passes OpenCode's dangerous `--auto` flag by default.
 
+## GitHub Issues
+
+Open **Issues** for a selected project and link its `origin` remote. AgentSmith derives the repository owner and name from the remote without storing its URL credentials. A GitHub personal access token with repository metadata and issue write permission can be entered for the current session, or supplied through `AGENTSMITH_GITHUB_TOKEN` before starting AgentSmith. Tokens are held only by the Electron main process and are never persisted or passed to an AI provider.
+
+**Analyze current status** asks the selected local provider to review bounded project structure, Git status, README, package metadata, and instruction context. The provider must return JSON issue drafts. AgentSmith validates the response and shows every draft for review. Only after selecting **Create selected issue(s)** does the main process make authenticated `POST /repos/{owner}/{repo}/issues` calls. A failed batch leaves the remaining drafts available for retry; no text response is represented as a created ticket.
+
 ## Security Boundaries
 
-Project reads are root-bound and reject traversal and symlink escapes. The viewer and prompt context deny application-baseline sensitive paths such as `.env*` and common private-key extensions, plus active guardrails. AgentSmith writes only managed instruction paths and rejects existing symlink instruction targets until explicitly reviewed. Suggestion writes accept a project name but never a path: the name must be usable as a single directory segment, the resolved directory must stay inside the suggestions root, and each file is created exclusively so nothing is overwritten. Prompt-only guardrails are advisory; an unsandboxed provider can still make its own filesystem or network decisions after launch. Provider sandboxing is reported as unsupported unless the provider exposes and AgentSmith configures that capability.
+Project reads are root-bound and reject traversal and symlink escapes. The viewer and prompt context deny application-baseline sensitive paths such as `.env*` and common private-key extensions, plus active guardrails. AgentSmith writes only managed instruction paths and rejects existing symlink instruction targets until explicitly reviewed. Suggestion writes accept a project name but never a path: the name must be usable as a single directory segment, the resolved directory must stay inside the suggestions root, and each file is created exclusively so nothing is overwritten. GitHub issue writes are host-bound, input-validated, authenticated in the main process, and require an explicit selection action after provider review. Prompt-only guardrails are advisory; an unsandboxed provider can still make its own filesystem or network decisions after launch. Provider sandboxing is reported as unsupported unless the provider exposes and AgentSmith configures that capability.
 
 See [`docs/security-model.md`](docs/security-model.md) for the complete threat model and [`docs/architecture.md`](docs/architecture.md) for module boundaries.

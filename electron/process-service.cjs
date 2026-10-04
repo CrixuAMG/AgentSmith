@@ -24,6 +24,10 @@ function closeProcessInput(child) {
   child.stdin?.end();
 }
 
+function providerEnvironment(environment = process.env) {
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => !/^AGENTSMITH_(?:GITHUB|GITLAB)_TOKEN$/.test(key)));
+}
+
 function now() {
   return new Date().toISOString();
 }
@@ -141,7 +145,8 @@ async function launchProcess(item) {
       cwd: root,
       shell: false,
       windowsHide: true,
-      env: process.env,
+      // VCS credentials belong to the main-process API client, never to an AI provider.
+      env: providerEnvironment(),
     });
   } catch (error) {
     sendEvent(record, emit, { executionId, kind: 'failed', text: error instanceof Error ? error.message : String(error), exitCode: null });
@@ -199,7 +204,9 @@ async function startProcess(request, emit, maxConcurrentJobs = defaultMaxConcurr
     id: jobId,
     projectId: request.projectId ?? null,
     historyEntryId: request.historyEntryId ?? null,
-    task: request.task || (request.purpose === 'suggestion' ? 'Generate provider suggestions' : 'Provider execution'),
+    task: request.task || (request.purpose === 'suggestion'
+      ? 'Generate provider suggestions'
+      : request.purpose === 'issue-analysis' ? 'Analyze repository for issue drafts' : 'Provider execution'),
     state: 'queued',
     executionId,
     command: null,
@@ -261,6 +268,7 @@ module.exports = {
   cancelAllProcesses,
   evaluateExecutionGuardrails,
   closeProcessInput,
+  providerEnvironment,
   normalizeMaxConcurrentJobs,
   listPromptJobs,
   hydrateJobs,

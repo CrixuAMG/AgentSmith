@@ -16,6 +16,7 @@ Electron main process
 ├── InstructionService       AGENTS.md discovery and guarded atomic writes
 ├── SuggestionService        validated suggestion markdown persistence
 ├── ProviderRegistry         OpenCode and Codex adapters
+├── VcsService               GitHub discovery, credentials, and issue API
 ├── ProcessService           allowlisted provider process execution
 └── IPC handlers             typed, minimal renderer-facing operations
 
@@ -55,10 +56,13 @@ The preload bridge exposes only these operation families:
 * `git.status` and `git.diff` for read-only repository inspection.
 * `instructions.list`, `instructions.read`, and `instructions.write`.
 * `providers.discover`.
+* `vcs.discover`, `vcs.credential`, and repository issue list/create/update operations.
 * `suggestions.save` for a project-scoped suggestion markdown file.
 * `process.start`, `process.cancel`, `process.list`, and process event subscriptions.
 
 No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array. The main process owns bounded durable job records and reconciles jobs that cannot survive an Electron restart. No IPC method accepts a writable path: `suggestions.save` receives the project and the body only, and the main process derives the storage location.
+
+The VCS service is provider-neutral at the renderer boundary, but GitHub is the only hosted provider implementation in this release. Credentials are session-only or read from the dedicated environment variable, remain in main-process memory, and are never included in provider execution environments. Issue analysis uses the existing allowlisted provider process and returns validated drafts to the renderer; the renderer must explicitly select drafts before invoking the VCS write method.
 
 ## Provider Contract
 
