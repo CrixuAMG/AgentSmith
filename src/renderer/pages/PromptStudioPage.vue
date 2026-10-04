@@ -49,6 +49,7 @@ const rewriteOutput = ref('');
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 const maxSuggestionOutputChars = 256 * 1024;
 const maxRewriteOutputChars = 256 * 1024;
+const rewriteMetadataLinePattern = /^\s*build\s*·\s*[^\r\n]+\s*$/i;
 const gitDiffSelection = ref<{ path: string; staged: boolean } | null>(null);
 // A prompt handed over from the Issues page is consumed once, then cleared, so a later
 // visit to this page never silently restores an old issue.
@@ -374,7 +375,11 @@ function handleRewriteEvent(event: { executionId: string; kind: string; text?: s
       : nextOutput;
   }
   if (event.kind === 'completed') {
-    const rewritten = rewriteOutput.value.trim();
+    const rewritten = rewriteOutput.value
+      .split(/\r?\n/)
+      .filter((line) => !rewriteMetadataLinePattern.test(line))
+      .join('\n')
+      .trim();
     if (rewritten) {
       task.value = rewritten;
     }

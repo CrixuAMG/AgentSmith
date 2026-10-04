@@ -9,6 +9,7 @@ import { store } from '@/renderer/services/store';
 import { DEFAULT_CONFIG, DEFAULT_GOALS, DEFAULT_GUARDRAILS, DEFAULT_PROFILES, DEFAULT_PROVIDER_SETTINGS, DEFAULT_ROLES, DEFAULT_VCS_SETTINGS } from '@/shared/defaults';
 
 let projectInstructions = '## Repository integration\n\n- issues: allow\n- branches: allow\n- pull-requests: allow\n';
+let processListener: ((event: { executionId: string; kind: string; text?: string }) => void) | null = null;
 const mountedWrappers: Array<{ unmount: () => void }> = [];
 
 vi.mock('@/renderer/services/api', () => ({
@@ -21,9 +22,21 @@ vi.mock('@/renderer/services/api', () => ({
     readInstruction: async () => projectInstructions,
     readFile: async () => { throw new Error('unavailable'); },
     discoverProviders: async () => [{ installation: { providerId: 'opencode', installed: true, version: '1.0.0' }, models: [] }],
-    startProcess: async () => ({ executionId: 'exec-1', command: 'opencode run <prompt>' }),
-  },
-  onProcessEvent: () => () => {},
+     startProcess: async (request: { prompt?: string }) => {
+       const executionId = 'exec-1';
+       if (request.prompt?.startsWith('Rewrite and improve')) {
+         queueMicrotask(() => {
+           processListener?.({ executionId, kind: 'stdout', text: 'build · gpt-5.6-luna\n\nRewritten task description.' });
+           processListener?.({ executionId, kind: 'completed' });
+         });
+       }
+       return { executionId, command: 'opencode run <prompt>' };
+     },
+   },
+   onProcessEvent: (callback: typeof processListener) => {
+     processListener = callback;
+     return () => { processListener = null; };
+   },
 }));
 
 function snapshot() {
@@ -71,6 +84,7 @@ describe('prompt studio repository workflow', () => {
     store.tree = [];
     store.treeLoadedFor = null;
     store.promptFiles = [];
+    processListener = null;
   });
 
   it('adds the authorized repository operations and the merge prohibition', async () => {
@@ -106,5 +120,15 @@ describe('prompt studio repository workflow', () => {
     await wrapper.find('.task-editor textarea').setValue('Replaced by hand.');
     await flushPromises();
     expect((wrapper.find('.task-editor textarea').element as HTMLTextAreaElement).value).toBe('Replaced by hand.');
+  });
+
+  it('does not put provider build metadata into a rewritten task', async () => {
+    const wrapper = await mountStudio();
+    await wrapper.find('.task-editor textarea').setValue('Describe the retry behavior.');
+    await wrapper.findAll('button').find((button) => button.text().includes('Rewrite prompt'))?.trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    expect((wrapper.find('.task-editor textarea').element as HTMLTextAreaElement).value).toBe('Rewritten task description.');
   });
 });
