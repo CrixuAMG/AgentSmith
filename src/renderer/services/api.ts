@@ -121,6 +121,9 @@ function browserApi(): AgentSmithApi {
     async setVcsCredential(_providerId: VcsProviderId, _token: string | null): Promise<VcsCredentialState> {
       throw new Error('Repository credentials require the desktop application.');
     },
+    async authorizeGitHub(): Promise<VcsCredentialState> {
+      throw new Error('GitHub authorization requires the desktop application.');
+    },
     async listRepositoryIssues(_project: Project, _options: { state: 'open' | 'closed' | 'all' }): Promise<IssueListResult> {
       return { ok: false, repository: '', issues: [], error: 'Repository issues require the desktop application.' };
     },
@@ -176,6 +179,7 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     writeInstruction: (project, relativePath, content, overwrite) => bridge.writeInstruction(toPlainIpcValue(project), relativePath, content, overwrite),
     listRepositoryIssues: (project, options) => bridge.listRepositoryIssues(toPlainIpcValue(project), toPlainIpcValue(options)),
     createRepositoryIssue: (project, draft) => bridge.createRepositoryIssue(toPlainIpcValue(project), toPlainIpcValue(draft)),
+    authorizeGitHub: () => bridge.authorizeGitHub(),
     updateRepositoryIssue: (project, number, patch) => bridge.updateRepositoryIssue(toPlainIpcValue(project), number, toPlainIpcValue(patch)),
     saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),

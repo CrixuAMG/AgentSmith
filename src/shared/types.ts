@@ -316,7 +316,7 @@ export interface VcsProviderCapabilities {
   supportsMerge: false;
 }
 
-export type VcsCredentialSource = 'session' | 'environment' | 'none';
+export type VcsCredentialSource = 'session' | 'environment' | 'oauth' | 'none';
 
 export interface VcsCredentialState {
   providerId: VcsProviderId;
@@ -555,6 +555,7 @@ export interface AgentSmithApi {
   discoverProviders(): Promise<ProviderDiscovery[]>;
   discoverVcsProviders(): Promise<VcsProviderDiscovery[]>;
   setVcsCredential(providerId: VcsProviderId, token: string | null): Promise<VcsCredentialState>;
+  authorizeGitHub(): Promise<VcsCredentialState>;
   listRepositoryIssues(project: Project, options: { state: 'open' | 'closed' | 'all' }): Promise<IssueListResult>;
   createRepositoryIssue(project: Project, draft: IssueDraft): Promise<IssueWriteResult>;
   updateRepositoryIssue(project: Project, number: number, patch: IssuePatch): Promise<IssueWriteResult>;

@@ -47,6 +47,8 @@ The user-selected project is untrusted input. Project files, Git output, provide
 ## Hosted Repository Rules
 
 * GitHub credentials are accepted only by the main-process VCS service, held in memory for the session, and never written to configuration or returned through IPC.
+
+* GitHub OAuth Device Flow uses only a public client ID from `AGENTSMITH_GITHUB_OAUTH_CLIENT_ID`; no client secret is shipped in the desktop application. The resulting access token follows the same main-process-only session handling as a personal access token.
 * `AGENTSMITH_GITHUB_TOKEN` is available to the VCS service but is removed from the environment of every AI provider child process.
 * Repository links are derived from the local Git remote and validated again at the IPC boundary. GitHub issue paths, titles, bodies, labels, and issue states use explicit bounds and allowlists.
 * Provider issue analysis is untrusted output. It must parse as a bounded JSON issue list; prose, malformed objects, duplicate titles, and oversized fields are rejected or skipped before a write.

@@ -11,6 +11,7 @@ const {
   listRepositoryIssues,
   setVcsCredential,
   updateRepositoryIssue,
+  authorizeGitHub,
 } = require('./vcs-service.cjs');
 const { startProcess, cancelProcess, cancelAllProcesses, hydrateJobs, listPromptJobs } = require('./process-service.cjs');
 const { saveSuggestion } = require('./suggestion-service.cjs');
@@ -71,6 +72,7 @@ app.whenReady().then(async () => {
   // session. No merge channel exists: issues are the only repository write AgentSmith has.
   ipcMain.handle('vcs:discover', () => discoverVcsProviders());
   ipcMain.handle('vcs:credential', (_event, providerId, token) => setVcsCredential(providerId, token));
+  ipcMain.handle('vcs:github:authorize', () => authorizeGitHub());
   ipcMain.handle('vcs:issues:list', (_event, project, options) => listRepositoryIssues(project, options || {}));
   ipcMain.handle('vcs:issues:create', (_event, project, draft) => createRepositoryIssue(project, draft));
   ipcMain.handle('vcs:issues:update', (_event, project, number, patch) => updateRepositoryIssue(project, number, patch));
