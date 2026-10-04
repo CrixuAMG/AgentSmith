@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
-import type { AppSnapshot, ViewId } from '@/shared/types';
+import type { AppSnapshot, ExternalPermissionScope, ViewId } from '@/shared/types';
 import DashboardPage from './pages/DashboardPage.vue';
 import AgentProfilesPage from './pages/AgentProfilesPage.vue';
 import PersonalizationPage from './pages/PersonalizationPage.vue';
@@ -16,8 +16,9 @@ import { PALETTE_EVENTS, type PaletteCommand } from './services/command-palette'
 import { initializeStore, persist, selectedProject, store } from './services/store';
 import { resetLayout, selectWorkspaceTab } from './services/store';
 import PermissionGrantModal from './components/Permissions/PermissionGrantModal.vue';
-import { pendingPermRequest } from './services/permissions';
+import { pendingPermRequest, sessionAllowedPaths } from './services/permissions';
 import { api } from './services/api';
+import { isValidExternalPath, normalizeExternalPath } from '@/shared/permission-rules';
 
 const { t, locale } = useI18n();
 const error = ref<string | null>(null);
@@ -25,6 +26,8 @@ const appSnapshot = computed(() => store.snapshot as AppSnapshot);
 const project = computed(selectedProject);
 const paletteOpen = ref(false);
 const paletteInvoker = ref<HTMLElement | null>(null);
+const permissionError = ref<string | null>(null);
+const failedPermissionScope = ref<ExternalPermissionScope | null>(null);
 
 const navigation = computed(() => [
   { id: 'dashboard' as const, label: t('nav.dashboard'), icon: '⌂' },
@@ -129,19 +132,54 @@ function selectView(view: ViewId) {
   store.activeView = view;
 }
 
-async function handlePermGrant(_res: { scope: 'global' | 'project' | 'once' | 'session' }) {
+async function handlePermGrant(res: { scope: ExternalPermissionScope }) {
   if (!pendingPermRequest.value) return;
   const request = pendingPermRequest.value;
-  const targetPath = request.path;
+  if (!isValidExternalPath(request.path)) {
+    permissionError.value = 'The requested path is invalid, so access was denied.';
+    failedPermissionScope.value = null;
+    return;
+  }
+  const targetPath = normalizeExternalPath(request.path);
+  permissionError.value = null;
+  failedPermissionScope.value = res.scope;
   try {
-    await api.syncPermissions({ allowedExternalPaths: [targetPath] });
-  } catch {
-    // ignore
+    if (res.scope === 'session') {
+      sessionAllowedPaths.value.add(targetPath);
+    } else if (res.scope === 'project') {
+      if (!project.value || !store.snapshot) throw new Error('A project must be selected for a project grant.');
+      project.value.allowedExternalPaths = [...new Set([...(project.value.allowedExternalPaths ?? []), targetPath])];
+      await persist('projects', store.snapshot.projects);
+    } else if (res.scope === 'global') {
+      if (!store.snapshot) throw new Error('The application is still loading.');
+      store.snapshot.config.allowedExternalPathsGlobal = [...new Set([...(store.snapshot.config.allowedExternalPathsGlobal ?? []), targetPath])];
+      await persist('config', store.snapshot.config);
+    }
+    if (res.scope === 'project' || res.scope === 'global') {
+      const currentProject = project.value;
+      const result = await api.syncPermissions({
+        project: currentProject,
+        allowedExternalPaths: currentProject?.allowedExternalPaths ?? [],
+        allowedExternalPathsGlobal: store.snapshot?.config.allowedExternalPathsGlobal ?? [],
+      });
+      if (!result.ok) throw new Error('Permission files could not be written.');
+    }
+  } catch (grantError) {
+    permissionError.value = grantError instanceof Error ? grantError.message : String(grantError);
+    return;
   }
   if (request.callback) {
     request.callback({ allowed: true, path: targetPath });
   }
+  permissionError.value = null;
+  failedPermissionScope.value = null;
   pendingPermRequest.value = null;
+}
+
+function retryPermGrant() {
+  if (failedPermissionScope.value && pendingPermRequest.value) {
+    void handlePermGrant({ scope: failedPermissionScope.value });
+  }
 }
 
 async function handlePermDeny() {
@@ -150,6 +188,8 @@ async function handlePermDeny() {
   if (request.callback) {
     request.callback({ allowed: false });
   }
+  permissionError.value = null;
+  failedPermissionScope.value = null;
   pendingPermRequest.value = null;
 }
 
@@ -215,5 +255,5 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleGlobalKeydown)
     </main>
   </div>
   <CommandPalette :open="paletteOpen" :commands="paletteCommands" :provider-status="providerStatus" @close="closePalette" @execute="executePaletteCommand" />
-  <PermissionGrantModal :open="!!pendingPermRequest" :request="pendingPermRequest" @grant="handlePermGrant" @deny="handlePermDeny" />
+  <PermissionGrantModal :open="!!pendingPermRequest" :request="pendingPermRequest" :error="permissionError" @grant="handlePermGrant" @retry="retryPermGrant" @deny="handlePermDeny" />
 </template>

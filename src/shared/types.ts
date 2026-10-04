@@ -40,6 +40,15 @@ export interface Project {
   repository?: RepositoryLink | null;
 }
 
+export type ExternalPermissionScope = 'once' | 'session' | 'project' | 'global';
+export interface PermissionGrant { path: string; scope: ExternalPermissionScope; }
+export interface PermissionSyncPayload {
+  project: Project | null;
+  allowedExternalPaths: string[];
+  allowedExternalPathsGlobal: string[];
+  writeExternalRepo?: boolean;
+}
+
 export interface Goal {
   version: number;
   id: string;
@@ -553,6 +562,6 @@ export interface AgentSmithApi {
   startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; jobId?: string; command: string | null }>;
   cancelProcess(executionId: string): Promise<void>;
   listPromptJobs(): Promise<PromptJob[]>;
-  syncPermissions(payload: { projectPath?: string; allowedExternalPaths?: string[] }): Promise<{ ok: boolean }>;
+  syncPermissions(payload: PermissionSyncPayload): Promise<{ ok: boolean }>;
   onProcessEvent(callback: (event: ExecutionEvent) => void): () => void;
 }

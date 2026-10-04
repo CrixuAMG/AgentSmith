@@ -86,22 +86,14 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('process:cancel', (_event, executionId) => cancelProcess(executionId));
   ipcMain.handle('process:list', () => listPromptJobs());
-  ipcMain.handle('permissions:sync', async (_event, { project, allowedExternalPaths = [], allowedExternalPathsGlobal = [], writeExternalRepo = true } = {}) => {
+  ipcMain.handle('permissions:sync', async (_event, { project = null, allowedExternalPaths = [], allowedExternalPathsGlobal = [], writeExternalRepo = true } = {}) => {
     const asRoot = path.join(__dirname, '..');
     // AgentSmith workspace permissions
-    try {
-      const asPerms = buildExternalPermissions([...allowedExternalPathsGlobal, ...(project?.allowedExternalPaths || [])]);
-      await writeOpencodeJsonc(asRoot, asPerms);
-    } catch {
-      // ignore
-    }
+    const asPerms = buildExternalPermissions([...allowedExternalPathsGlobal, ...allowedExternalPaths]);
+    await writeOpencodeJsonc(asRoot, asPerms);
     // External repo if requested
     if (writeExternalRepo && project?.path) {
-      try {
-        await writeOpencodeJsonc(project.path, buildExternalPermissions(project.allowedExternalPaths || allowedExternalPaths));
-      } catch {
-        // ignore
-      }
+      await writeOpencodeJsonc(project.path, buildExternalPermissions(allowedExternalPaths));
     }
     return { ok: true };
   });

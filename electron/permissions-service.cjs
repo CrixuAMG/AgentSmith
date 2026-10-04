@@ -9,10 +9,18 @@ function normalizeExternalPath(p) {
   return cleaned;
 }
 
+function isValidExternalPath(value) {
+  if (typeof value !== 'string') return false;
+  const cleaned = value.trim().replace(/\/*\*$/, '');
+  return cleaned.length > 0 && !cleaned.includes('\0')
+    && (cleaned.startsWith('/') || /^[A-Za-z]:[\\/]/.test(cleaned));
+}
+
 function buildExternalPermissions(additions = []) {
   const result = {};
   const seen = new Set();
   for (const a of additions) {
+    if (!isValidExternalPath(a)) throw new Error('Invalid external permission path.');
     const n = normalizeExternalPath(a);
     if (n && !seen.has(n)) {
       seen.add(n);
@@ -37,6 +45,7 @@ async function writeOpencodeJsonc(targetDir, externalPerms = {}) {
 
 module.exports = {
   normalizeExternalPath,
+  isValidExternalPath,
   buildExternalPermissions,
   writeOpencodeJsonc,
 };

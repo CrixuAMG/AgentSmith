@@ -8,6 +8,7 @@ import FileTreeNode from '../components/FileTreeNode.vue';
 import FileViewer from '../components/FileViewer.vue';
 import CommitList from '../components/CommitList.vue';
 import { api } from '../services/api';
+import { isValidExternalPath, normalizeExternalPath } from '@/shared/permission-rules';
 import { PALETTE_EVENTS } from '../services/command-palette';
 import { fuzzySearch, indexProjectTree, type SearchEntry } from '../services/file-search';
 import {
@@ -416,12 +417,20 @@ async function saveExternalPaths() {
     .split(/\n+/)
     .map((p) => p.trim())
     .filter((p) => p);
-  project.value.allowedExternalPaths = paths;
-  await persist('projects', store.snapshot?.projects ?? []);
   try {
-    await api.syncPermissions({ projectPath: project.value.path, allowedExternalPaths: paths });
-  } catch {
-    // ignore
+    if (paths.some((item) => !isValidExternalPath(item))) throw new Error('Each permission must be an absolute directory or file path.');
+    const normalized = [...new Set(paths.map(normalizeExternalPath))];
+    project.value.allowedExternalPaths = normalized;
+    await persist('projects', store.snapshot?.projects ?? []);
+    const result = await api.syncPermissions({
+      project: project.value,
+      allowedExternalPaths: normalized,
+      allowedExternalPathsGlobal: store.snapshot?.config.allowedExternalPathsGlobal ?? [],
+    });
+    if (!result.ok) throw new Error('Permission files could not be written.');
+    localError.value = null;
+  } catch (saveError) {
+    localError.value = saveError instanceof Error ? saveError.message : String(saveError);
   }
 }
 
@@ -510,5 +519,3 @@ async function saveExternalPaths() {
     <div v-if="draftPromptOpen" class="modal-backdrop"><section class="confirm-modal draft-confirm-modal" role="dialog" aria-modal="true"><span class="eyebrow">{{ t('instructions.unsavedEyebrow') }}</span><h2>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteTitle') : t('instructions.unsavedTitle') }}</h2><p>{{ draftPromptMode === 'overwrite' ? t('instructions.overwriteDetail') : t('instructions.unsavedDetail') }}</p><div class="modal-actions"><button class="secondary-button" type="button" @click="cancelDraftPrompt">{{ t('common.cancel') }}</button><button v-if="draftPromptMode === 'switch'" class="danger-button" type="button" @click="discardDraftAndContinue">{{ t('instructions.discardDraft') }}</button><button class="primary-button" type="button" @click="saveDraftAndContinue">{{ t('common.save') }}</button></div></section></div>
   </div>
 </template>
-
-

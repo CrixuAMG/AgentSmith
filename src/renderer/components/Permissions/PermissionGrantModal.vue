@@ -6,12 +6,14 @@
       <p>A tool is requesting access to:</p>
       <code class="mono">{{ request?.path }}</code>
       <p class="muted small">Scope default: project</p>
+      <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       <div class="modal-actions">
         <button class="secondary-button" type="button" @click="deny">Deny</button>
         <button class="secondary-button" type="button" @click="once">Allow once</button>
         <button class="secondary-button" type="button" @click="session">Allow this session</button>
         <button class="primary-button" type="button" @click="project">Allow for this project</button>
         <button class="secondary-button" type="button" @click="global">Allow globally</button>
+        <button v-if="error" class="primary-button" type="button" @click="retry">Retry</button>
       </div>
     </section>
   </div>
@@ -21,14 +23,16 @@ import { defineProps, defineEmits } from 'vue';
 
 interface PermReq { path: string; tool?: string }
 
-defineProps<{ open: boolean; request: PermReq | null }>()
+defineProps<{ open: boolean; request: PermReq | null; error?: string | null }>()
 const emit = defineEmits<{
   (e: 'grant', res: { scope: 'once'|'session'|'project'|'global' }): void
   (e: 'deny'): void
+  (e: 'retry'): void
 }>()
 function deny(){ emit('deny') }
 function once(){ emit('grant', { scope: 'once' }) }
 function session(){ emit('grant', { scope: 'session' }) }
 function project(){ emit('grant', { scope: 'project' }) }
 function global(){ emit('grant', { scope: 'global' }) }
+function retry(){ emit('retry') }
 </script>
