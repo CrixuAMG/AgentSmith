@@ -62,7 +62,7 @@ The preload bridge exposes only these operation families:
 
 No IPC method accepts a shell command. Process execution receives a provider ID and an execution request; the adapter constructs an executable plus argument array. The main process owns bounded durable job records and reconciles jobs that cannot survive an Electron restart. No IPC method accepts a writable path: `suggestions.save` receives the project and the body only, and the main process derives the storage location.
 
-The VCS service is provider-neutral at the renderer boundary, but GitHub is the only hosted provider implementation in this release. Credentials are session-only or read from the dedicated environment variable, remain in main-process memory, and are never included in provider execution environments. Desktop builds can use GitHub OAuth Device Flow with the public client ID from `AGENTSMITH_GITHUB_OAUTH_CLIENT_ID`; no client secret is shipped. Issue analysis uses the existing allowlisted provider process and returns validated drafts to the renderer; the renderer must explicitly select drafts before invoking the VCS write method.
+The VCS service is provider-neutral at the renderer boundary, but GitHub is the only hosted provider implementation in this release. Credentials use one PAT flow, remain in main-process memory, and may be remembered only as an OS-encrypted blob at `vcs/github-credential.json`. They are never included in provider execution environments. Issue analysis uses the existing allowlisted provider process and returns validated drafts to the renderer; the renderer must explicitly select drafts before invoking the VCS write method.
 
 ## Provider Contract
 

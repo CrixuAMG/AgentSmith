@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require('electron');
 const path = require('node:path');
 
 const { loadSnapshot, saveResource, root: storageRoot } = require('./config-store.cjs');
@@ -11,7 +11,9 @@ const {
   listRepositoryIssues,
   setVcsCredential,
   updateRepositoryIssue,
-  authorizeGitHub,
+  configureCredentialStorage,
+  loadStoredVcsCredential,
+  persistVcsCredential,
 } = require('./vcs-service.cjs');
 const { startProcess, cancelProcess, cancelAllProcesses, hydrateJobs, listPromptJobs } = require('./process-service.cjs');
 const { saveSuggestion } = require('./suggestion-service.cjs');
@@ -43,6 +45,13 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   const initialSnapshot = await loadSnapshot();
+  configureCredentialStorage({
+    filePath: path.join(storageRoot, 'vcs', 'github-credential.json'),
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    encrypt: (token) => safeStorage.encryptString(token),
+    decrypt: (value) => safeStorage.decryptString(value),
+  });
+  await loadStoredVcsCredential();
   hydrateJobs(initialSnapshot.promptJobs);
   ipcMain.handle('storage:load', () => loadSnapshot());
   ipcMain.handle('storage:save', (_event, key, value) => saveResource(key, value));
@@ -68,11 +77,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('instructions:read', (_event, project, relativePath, guardrails) => projectService.readInstruction(project, relativePath, path.join(storageRoot, 'instructions', 'global.md'), guardrails));
   ipcMain.handle('instructions:write', (_event, project, relativePath, content, overwrite) => projectService.writeInstruction(project, relativePath, content, overwrite, path.join(storageRoot, 'instructions', 'global.md')));
   ipcMain.handle('providers:discover', () => discoverProviders());
-  // Repository credentials are accepted here and held in main-process memory for the
-  // session. No merge channel exists: issues are the only repository write AgentSmith has.
+  // Repository credentials are accepted here. The optional remembered credential is
+  // encrypted by Electron's OS-backed safeStorage and never enters the renderer.
   ipcMain.handle('vcs:discover', () => discoverVcsProviders());
-  ipcMain.handle('vcs:credential', (_event, providerId, token) => setVcsCredential(providerId, token));
-  ipcMain.handle('vcs:github:authorize', () => authorizeGitHub());
+  ipcMain.handle('vcs:credential', async (_event, providerId, token, remember = false) => {
+    const state = setVcsCredential(providerId, token);
+    const persistence = await persistVcsCredential(providerId, token, Boolean(remember));
+    return { ...state, persisted: persistence.persisted };
+  });
   ipcMain.handle('vcs:issues:list', (_event, project, options) => listRepositoryIssues(project, options || {}));
   ipcMain.handle('vcs:issues:create', (_event, project, draft) => createRepositoryIssue(project, draft));
   ipcMain.handle('vcs:issues:update', (_event, project, number, patch) => updateRepositoryIssue(project, number, patch));

@@ -28,7 +28,7 @@ The user-selected project is untrusted input. Project files, Git output, provide
 ## Configuration Rules
 
 * Configuration is local JSON under the platform configuration root.
-* API keys, tokens, environment file contents, and private keys are not stored by AgentSmith.
+* API keys, raw tokens, environment file contents, and private keys are not stored by AgentSmith. A user-selected GitHub token may be stored only as an OS-encrypted blob at `vcs/github-credential.json`.
 * Writes validate resource shape and version, create a timestamped backup, then atomically rename a temporary file.
 * Malformed resources are quarantined with a `.invalid-<timestamp>` suffix and replaced with defaults; the user receives a warning.
 * Known version-zero resources are migrated with a backup. Unknown future versions are left untouched and surfaced as warnings. Unknown envelope fields are retained when a valid resource is saved.
@@ -46,13 +46,11 @@ The user-selected project is untrusted input. Project files, Git output, provide
 
 ## Hosted Repository Rules
 
-* GitHub credentials are accepted only by the main-process VCS service, held in memory for the session, and never written to configuration or returned through IPC.
-
-* GitHub OAuth Device Flow uses only a public client ID from `AGENTSMITH_GITHUB_OAUTH_CLIENT_ID`; no client secret is shipped in the desktop application. The resulting access token follows the same main-process-only session handling as a personal access token.
+* GitHub credentials are accepted only by the main-process VCS service. A remembered token is encrypted with Electron `safeStorage` and stored at `vcs/github-credential.json`; it is never returned through IPC.
 * `AGENTSMITH_GITHUB_TOKEN` is available to the VCS service but is removed from the environment of every AI provider child process.
 * Repository links are derived from the local Git remote and validated again at the IPC boundary. GitHub issue paths, titles, bodies, labels, and issue states use explicit bounds and allowlists.
 * Provider issue analysis is untrusted output. It must parse as a bounded JSON issue list; prose, malformed objects, duplicate titles, and oversized fields are rejected or skipped before a write.
-* Creating an issue requires an explicit user selection in the Issues page. Each selected draft is posted through the main-process GitHub client, and the result must contain a readable GitHub issue before the UI reports success.
+* Creating or editing an issue requires the GitHub token's `Issues: Read and write` permission. Each write is sent through the main-process GitHub client, and the result must contain a readable GitHub issue before the UI reports success.
 * AgentSmith does not expose merge, force-push, reset, or arbitrary hosted-repository operations. Additional providers can implement the same narrow contract without receiving GitHub credentials.
 
 ## Guardrail Layers

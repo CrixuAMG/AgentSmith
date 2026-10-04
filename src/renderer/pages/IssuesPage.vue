@@ -23,6 +23,7 @@ const stateFilter = ref<'open' | 'closed' | 'all'>('open');
 const issues = ref<RepositoryIssue[]>([]);
 const issuesLoading = ref(false);
 const tokenDraft = ref('');
+const rememberToken = ref(true);
 const instructionText = ref('');
 const selectedIssue = ref<RepositoryIssue | null>(null);
 const draft = ref<IssueDraft>({ title: '', body: '', labels: [] });
@@ -166,24 +167,9 @@ async function connect() {
   localError.value = null;
   status.value = null;
   try {
-    const state = await api.setVcsCredential('github', tokenDraft.value);
+    const state = await api.setVcsCredential('github', tokenDraft.value, rememberToken.value);
     tokenDraft.value = '';
-    status.value = state.configured ? t('issues.credentialStored') : t('issues.credentialMissing');
-    await discover();
-  } catch (error) {
-    localError.value = messageOf(error);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function authorizeGitHub() {
-  busy.value = true;
-  localError.value = null;
-  status.value = null;
-  try {
-    await api.authorizeGitHub();
-    status.value = t('issues.oauthConnected');
+    status.value = state.persisted ? t('issues.credentialStored') : state.configured ? t('issues.credentialSession') : t('issues.credentialMissing');
     await discover();
   } catch (error) {
     localError.value = messageOf(error);
@@ -560,7 +546,8 @@ onUnmounted(() => removeProcessListener?.());
           <div class="prompt-card-heading"><span class="eyebrow">{{ t('issues.credential') }}</span><span class="mono">{{ credentialState?.configured ? credentialState.source.toUpperCase() : 'NONE' }}</span></div>
           <p class="muted-copy">{{ t('issues.credentialDetail') }}</p>
           <label class="form-field"><span>{{ t('issues.token') }}</span><input v-model="tokenDraft" type="password" autocomplete="off" :placeholder="t('issues.tokenPlaceholder')" :disabled="busy"></label>
-          <div class="task-footer-actions"><button class="primary-button" type="button" :disabled="busy" @click="authorizeGitHub">{{ t('issues.authorizeApp') }}</button><button class="secondary-button" type="button" :disabled="busy || !tokenDraft.trim()" @click="connect">{{ t('issues.connect') }}</button><button class="quiet-button" type="button" :disabled="busy || (credentialState?.source !== 'session' && credentialState?.source !== 'oauth')" @click="disconnect">{{ t('issues.clearCredential') }}</button><button class="quiet-button" type="button" :disabled="discovering" @click="discover"><span v-if="discovering" class="loading-pulse"></span>{{ t('issues.verify') }}</button></div>
+           <label class="check-field"><input v-model="rememberToken" type="checkbox" :disabled="busy"><span>{{ t('issues.rememberToken') }}</span></label>
+           <div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="busy || !tokenDraft.trim()" @click="connect">{{ t('issues.connect') }}</button><button class="quiet-button" type="button" :disabled="busy || (credentialState?.source !== 'session' && credentialState?.source !== 'stored')" @click="disconnect">{{ t('issues.clearCredential') }}</button><button class="quiet-button" type="button" :disabled="discovering" @click="discover"><span v-if="discovering" class="loading-pulse"></span>{{ t('issues.verify') }}</button></div>
           <p v-if="discovery?.note" class="muted-copy">{{ discovery.note }}</p>
           <p class="muted-copy">{{ t('issues.tokenPermissions') }}</p>
           <p v-if="connected" class="toolbar-status"><span class="status-dot"></span>{{ t('issues.connectedAs', { account: discovery?.installation.account ?? '' }) }}</p>

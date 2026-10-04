@@ -3,16 +3,14 @@
  *
  * Two rules shape this module:
  *
- * 1. Credentials live in main-process memory for the session only. They can be seeded
- *    from `AGENTSMITH_GITHUB_TOKEN`, are never written to disk, and never appear in a
- *    result, a message, or a log line.
+ * 1. Credentials live in main-process memory. A remembered GitHub credential is stored
+ *    only as an OS-encrypted blob; raw tokens never appear in a result, message, or log.
  * 2. Merging does not exist here. There is no merge request, no merge endpoint, and no
  *    way for configuration to authorize one; closing a pull request is the only pull
  *    request transition offered.
  */
 
 const API_TIMEOUT_MS = 15000;
-const DEVICE_AUTH_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_ISSUES = 50;
 const MAX_ISSUE_TITLE_CHARS = 256;
 const MAX_ISSUE_BODY_CHARS = 65536;
@@ -23,6 +21,8 @@ const CREDENTIAL_PROVIDERS = new Set(['github', 'gitlab']);
 
 /** providerId -> token, held in memory for the lifetime of the process only. */
 const sessionCredentials = new Map();
+const storedCredentials = new Map();
+let credentialStorage = null;
 
 const providerCapabilities = {
   github: { supportsIssues: true, supportsBranches: true, supportsPullRequests: true, supportsMerge: false },
@@ -41,6 +41,8 @@ function credentialFor(providerId) {
   if (providerId === 'gitlab' && process.env.AGENTSMITH_GITLAB_TOKEN?.trim()) {
     return { token: process.env.AGENTSMITH_GITLAB_TOKEN.trim(), source: 'environment' };
   }
+  const stored = storedCredentials.get(providerId);
+  if (stored) return { token: stored, source: 'stored' };
   return { token: null, source: 'none' };
 }
 
@@ -49,65 +51,47 @@ function credentialState(providerId) {
   return { providerId, configured: Boolean(token), source: token ? source : 'none' };
 }
 
-function githubOAuthClientId() {
-  return process.env.AGENTSMITH_GITHUB_OAUTH_CLIENT_ID?.trim() || null;
+function configureCredentialStorage(storage) {
+  credentialStorage = storage && typeof storage === 'object' ? storage : null;
 }
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function oauthRequest(endpoint, body) {
-  let response;
+async function loadStoredVcsCredential() {
+  storedCredentials.clear();
+  if (!credentialStorage?.encryptionAvailable) return false;
+  let parsed;
   try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'AgentSmith' },
-      body: new URLSearchParams(body).toString(),
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw new Error(`The GitHub authorization request failed: ${messageOf(error)}`);
+    parsed = JSON.parse(await require('node:fs/promises').readFile(credentialStorage.filePath, 'utf8'));
+    if (parsed?.version !== 1 || parsed.providerId !== 'github' || typeof parsed.encryptedToken !== 'string') return false;
+    const token = credentialStorage.decrypt(Buffer.from(parsed.encryptedToken, 'base64'));
+    if (typeof token !== 'string' || !token.trim()) return false;
+    storedCredentials.set('github', token.trim());
+    return true;
+  } catch {
+    return false;
   }
-  const data = await response.json().catch(() => null);
-  if (!response.ok || !data || typeof data !== 'object') {
-    throw new Error('GitHub authorization could not be started. Check the OAuth app configuration.');
-  }
-  return data;
 }
 
-/**
- * Authorizes the desktop app without embedding a client secret. The access token is
- * deliberately installed in the same session-only credential store as a PAT.
- */
-async function authorizeGitHub(openBrowser = (url) => require('electron').shell.openExternal(url), sleep = wait) {
-  const clientId = githubOAuthClientId();
-  if (!clientId) throw new Error('GitHub app authorization is not configured. Set AGENTSMITH_GITHUB_OAUTH_CLIENT_ID first.');
-  const device = await oauthRequest('https://github.com/login/device/code', { client_id: clientId, scope: 'repo' });
-  if (typeof device.device_code !== 'string' || typeof device.user_code !== 'string' || typeof device.verification_uri !== 'string') {
-    throw new Error('GitHub returned an invalid device authorization response.');
+async function persistVcsCredential(providerId, token, remember) {
+  storedCredentials.delete(providerId);
+  if (!credentialStorage?.encryptionAvailable || !remember || typeof token !== 'string' || !token.trim()) {
+    if (credentialStorage?.filePath) await require('node:fs/promises').unlink(credentialStorage.filePath).catch(() => {});
+    return { persisted: false };
   }
-  await openBrowser(`${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`);
-  const interval = Math.max(Number(device.interval) || 5, 5) * 1000;
-  const startedAt = Date.now();
-  let delay = interval;
-  while (Date.now() - startedAt < DEVICE_AUTH_TIMEOUT_MS) {
-    await sleep(delay);
-    const token = await oauthRequest('https://github.com/login/oauth/access_token', { client_id: clientId, device_code: device.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });
-    if (typeof token.access_token === 'string' && token.access_token) {
-      sessionCredentials.set('github', token.access_token);
-      return credentialState('github');
-    }
-    if (token.error === 'authorization_pending') continue;
-    if (token.error === 'slow_down') {
-      delay += 5000;
-      continue;
-    }
-    if (token.error === 'expired_token') throw new Error('The GitHub authorization code expired. Start the login again.');
-    if (token.error === 'access_denied') throw new Error('GitHub authorization was denied.');
-    throw new Error('GitHub authorization failed. Start the login again.');
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const encryptedToken = credentialStorage.encrypt(token.trim());
+  await fs.mkdir(path.dirname(credentialStorage.filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${credentialStorage.filePath}.tmp-${process.pid}-${Date.now()}`;
+  const document = JSON.stringify({ version: 1, providerId, encryptedToken: encryptedToken.toString('base64') });
+  try {
+    await fs.writeFile(temporary, `${document}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await fs.rename(temporary, credentialStorage.filePath);
+  } catch (error) {
+    await fs.unlink(temporary).catch(() => {});
+    throw error;
   }
-  throw new Error('GitHub authorization timed out. Start the login again.');
+  storedCredentials.set(providerId, token.trim());
+  return { persisted: true };
 }
 
 /**
@@ -118,12 +102,14 @@ function setVcsCredential(providerId, token) {
   if (!CREDENTIAL_PROVIDERS.has(providerId)) throw new Error(`The repository provider ${String(providerId)} is not supported.`);
   if (token === null || token === undefined || token === '') {
     sessionCredentials.delete(providerId);
+    storedCredentials.delete(providerId);
     return credentialState(providerId);
   }
   if (typeof token !== 'string') throw new Error('The credential must be a string.');
   const normalized = token.trim();
   if (!normalized) {
     sessionCredentials.delete(providerId);
+    storedCredentials.delete(providerId);
     return credentialState(providerId);
   }
   sessionCredentials.set(providerId, normalized);
@@ -355,7 +341,9 @@ module.exports = {
   listRepositoryIssues,
   createRepositoryIssue,
   setVcsCredential,
-  authorizeGitHub,
+  configureCredentialStorage,
+  loadStoredVcsCredential,
+  persistVcsCredential,
   updateRepositoryIssue,
   validateDraft,
 };

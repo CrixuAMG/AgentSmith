@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const vcs = require('../../electron/vcs-service.cjs') as {
@@ -9,7 +12,9 @@ const vcs = require('../../electron/vcs-service.cjs') as {
   discoverVcsProviders: () => Promise<Array<{ installation: { providerId: string; connected: boolean; error: string | null }; capabilities: { supportsMerge: boolean }; credential: { configured: boolean } }>>;
   listRepositoryIssues: (project: unknown, options: unknown) => Promise<{ ok: boolean; issues: unknown[]; error: string | null }>;
   setVcsCredential: (providerId: string, token: string | null) => { configured: boolean; source: string };
-  authorizeGitHub: (openBrowser?: (url: string) => Promise<void>, sleep?: (milliseconds: number) => Promise<void>) => Promise<{ configured: boolean; source: string }>;
+  configureCredentialStorage: (storage: unknown) => void;
+  loadStoredVcsCredential: () => Promise<boolean>;
+  persistVcsCredential: (providerId: string, token: string | null, remember: boolean) => Promise<{ persisted: boolean }>;
   updateRepositoryIssue: (project: unknown, number: number, patch: unknown) => Promise<{ ok: boolean; error: string | null }>;
   validateDraft: (draft: unknown) => { error: string | null; draft?: { title: string; labels: string[] } };
 };
@@ -24,7 +29,7 @@ const project = {
 
 afterEach(async () => {
   await setCredential(null);
-  delete process.env.AGENTSMITH_GITHUB_OAUTH_CLIENT_ID;
+  vcs.configureCredentialStorage(null);
 });
 
 async function setCredential(token: string | null) {
@@ -73,29 +78,29 @@ describe('session credentials', () => {
     delete process.env.AGENTSMITH_GITHUB_TOKEN;
   });
 
-  it('authorizes through GitHub device flow without exposing the access token', async () => {
-    const originalFetch = global.fetch;
-    process.env.AGENTSMITH_GITHUB_OAUTH_CLIENT_ID = 'client-id';
-    const opened: string[] = [];
-    let pollCount = 0;
-    global.fetch = async (input, init) => {
-      expect(init?.headers).toMatchObject({ accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' });
-      if (String(input).endsWith('/device/code')) {
-        expect(String(init?.body)).toContain('client_id=client-id');
-        return new Response(JSON.stringify({ device_code: 'device-secret', user_code: 'ABCD-1234', verification_uri: 'https://github.com/login/device', interval: 0 }), { status: 200 });
-      }
-      pollCount += 1;
-      expect(String(init?.body)).toContain('device_code=device-secret');
-      return new Response(JSON.stringify(pollCount === 1 ? { error: 'authorization_pending' } : { access_token: 'oauth-secret' }), { status: 200 });
-    };
+  it('persists only an encrypted credential and restores it after restart', async () => {
+    delete process.env.AGENTSMITH_GITHUB_TOKEN;
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agentsmith-vcs-'));
+    const filePath = path.join(root, 'vcs', 'github-credential.json');
+    vcs.configureCredentialStorage({
+      filePath,
+      encryptionAvailable: true,
+      encrypt: (token: string) => Buffer.from(`sealed:${token}`),
+      decrypt: (value: Buffer) => value.toString().replace(/^sealed:/, ''),
+    });
     try {
-      const state = await vcs.authorizeGitHub(async (url) => { opened.push(url); }, async () => {});
-      expect(opened).toEqual(['https://github.com/login/device?user_code=ABCD-1234']);
-      expect(pollCount).toBe(2);
-      expect(state).toEqual({ providerId: 'github', configured: true, source: 'session' });
-      expect(JSON.stringify(state)).not.toContain('oauth-secret');
+      vcs.setVcsCredential('github', 'ghp_persistedvalue');
+      expect(await vcs.persistVcsCredential('github', 'ghp_persistedvalue', true)).toEqual({ persisted: true });
+      const saved = await readFile(filePath, 'utf8');
+      expect(saved).not.toContain('ghp_persistedvalue');
+
+      vcs.setVcsCredential('github', null);
+      expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: false, source: 'none' });
+      expect(await vcs.loadStoredVcsCredential()).toBe(true);
+      expect(vcs.credentialState('github')).toEqual({ providerId: 'github', configured: true, source: 'stored' });
+      expect(await vcs.persistVcsCredential('github', null, false)).toEqual({ persisted: false });
     } finally {
-      global.fetch = originalFetch;
+      await rm(root, { recursive: true, force: true });
     }
   });
 });
