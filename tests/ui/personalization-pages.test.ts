@@ -106,7 +106,7 @@ describe('personalization page', () => {
 
     await wrapper.findAll('.section-tab')[1].trigger('click');
     expect(wrapper.text()).toContain('Default security');
-    const patterns = wrapper.findAll('.rule-grid input[type="text"]').map((input) => input.element.value);
+    const patterns = wrapper.findAll('.rule-grid input[type="text"]').map((input) => (input.element as HTMLInputElement).value);
     expect(patterns).toContain('git reset --hard');
   });
 

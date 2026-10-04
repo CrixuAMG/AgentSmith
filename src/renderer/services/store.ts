@@ -45,6 +45,11 @@ export const store = reactive({
   instructionDraft: '',
   instructionOriginalContent: '',
   instructionDirty: false,
+  commits: [] as Array<{ hash: string; shortHash: string; author: string; date: string; subject: string }>,
+  branches: [] as Array<{ name: string; isCurrent: boolean; isRemote: boolean; upstream: string | null; ahead: number; behind: number; date: string | null }>,
+  commitsLoading: false,
+  commitsError: null as string | null,
+  selectedBranch: null as string | null,
 });
 
 const earlyProcessEvents = new Map<string, ExecutionEvent>();
@@ -198,17 +203,53 @@ export function clearWorkspace() {
   store.treeLoadedFor = null;
   store.selectedFilePath = null;
   store.selectedFile = null;
-  store.promptFiles = [];
   store.git = null;
+  store.gitLoading = false;
   store.gitDiff = null;
   store.instructions = [];
+  store.instructionLoading = false;
   store.selectedInstructionPath = null;
   store.selectedInstructionContent = '';
   store.instructionDraftProjectId = null;
   store.instructionDraft = '';
   store.instructionOriginalContent = '';
   store.instructionDirty = false;
+  store.commits = [];
+  store.branches = [];
+  store.commitsLoading = false;
+  store.commitsError = null;
+  store.selectedBranch = null;
   store.error = null;
+}
+
+export async function loadCommits() {
+  const project = selectedProject();
+  if (!project) return;
+  store.commitsLoading = true;
+  store.commitsError = null;
+  try {
+    const branches = await api.gitBranches(project);
+    if (branches.isRepository) {
+      store.branches = branches.branches;
+      if (store.selectedBranch == null) store.selectedBranch = branches.current;
+    } else {
+      store.branches = [];
+      store.selectedBranch = null;
+    }
+    const log = await api.gitLog(project, { branch: store.selectedBranch, limit: 50 });
+    if (!log.isRepository) {
+      store.commits = [];
+      store.commitsError = log.error ?? 'This project is not a Git repository.';
+      return;
+    }
+    store.commits = log.commits;
+    store.commitsError = log.error;
+  } catch (error) {
+    store.commitsError = error instanceof Error ? error.message : String(error);
+    store.commits = [];
+  } finally {
+    store.commitsLoading = false;
+  }
 }
 
 export function applyResource(key: ResourceKey, value: unknown) {

@@ -14,6 +14,9 @@ import CommandPalette from './components/CommandPalette.vue';
 import { PALETTE_EVENTS, type PaletteCommand } from './services/command-palette';
 import { initializeStore, persist, selectedProject, store } from './services/store';
 import { resetLayout, selectWorkspaceTab } from './services/store';
+import PermissionGrantModal from './components/Permissions/PermissionGrantModal.vue';
+import { pendingPermRequest } from './services/permissions';
+import { api } from './services/api';
 
 const { t, locale } = useI18n();
 const error = ref<string | null>(null);
@@ -68,6 +71,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'project-picker', label: t('shell.openProject'), keywords: 'project select switch', shortcut: '⌘P', action: { kind: 'project-picker' as const } },
   { id: 'tab-explorer', label: t('workspace.explorer'), keywords: 'workspace tab files', action: { kind: 'workspace-tab' as const, tab: 'explorer' } },
   { id: 'tab-git', label: t('workspace.gitChanges'), keywords: 'workspace tab git', action: { kind: 'workspace-tab' as const, tab: 'git' } },
+  { id: 'tab-commits', label: t('commits.title'), keywords: 'workspace tab commits history', action: { kind: 'workspace-tab' as const, tab: 'commits' } },
   { id: 'tab-instructions', label: t('workspace.instructions'), keywords: 'workspace tab agents', action: { kind: 'workspace-tab' as const, tab: 'instructions' } },
   { id: 'layout-reset', label: t('layout.reset'), keywords: 'layout panels restore', action: { kind: 'layout-reset' as const } },
   { id: 'refresh-project', label: t('palette.refreshProject'), keywords: 'project reload scan git', action: { kind: 'event' as const, name: PALETTE_EVENTS.refreshProject } },
@@ -121,6 +125,30 @@ function selectView(view: ViewId) {
     store.instructionDirty = false;
   }
   store.activeView = view;
+}
+
+async function handlePermGrant(_res: { scope: 'global' | 'project' | 'once' | 'session' }) {
+  if (!pendingPermRequest.value) return;
+  const request = pendingPermRequest.value;
+  const targetPath = request.path;
+  try {
+    await api.syncPermissions({ allowedExternalPaths: [targetPath] });
+  } catch {
+    // ignore
+  }
+  if (request.callback) {
+    request.callback({ allowed: true, path: targetPath });
+  }
+  pendingPermRequest.value = null;
+}
+
+async function handlePermDeny() {
+  if (!pendingPermRequest.value) return;
+  const request = pendingPermRequest.value;
+  if (request.callback) {
+    request.callback({ allowed: false });
+  }
+  pendingPermRequest.value = null;
 }
 
 function openProjectPicker() {

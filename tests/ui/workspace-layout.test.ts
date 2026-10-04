@@ -85,8 +85,9 @@ describe('workspace layout', () => {
 
   it('persists the selected workspace tab', async () => {
     const wrapper = await mountWorkspace();
-    const tabs = wrapper.findAll('.workspace-tab');
-    await tabs[1].trigger('click');
+    const gitTab = wrapper.findAll('.workspace-tab').find((tab) => tab.text().includes('Git changes'));
+    expect(gitTab).toBeDefined();
+    await gitTab!.trigger('click');
     await flushPromises();
 
     expect(store.workspaceTab).toBe('git');

@@ -112,7 +112,7 @@ function browserApi(): AgentSmithApi {
     async listPromptJobs(): Promise<PromptJob[]> {
       return [];
     },
-    async syncPermissions() { return { ok: false } as any; },
+    async syncPermissions() { return { ok: false }; },
     onProcessEvent(callback) {
       listeners.add(callback);
       return () => listeners.delete(callback);
@@ -147,7 +147,7 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
     listPromptJobs: () => bridge.listPromptJobs(),
-    syncPermissions: (payload) => bridge.syncPermissions(toPlainIpcValue(payload)),
+    syncPermissions: (payload: any) => bridge.syncPermissions(toPlainIpcValue(payload)),
   };
 }
 

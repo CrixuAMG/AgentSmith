@@ -6,12 +6,14 @@ import type { Project, ProjectFileNode } from '@/shared/types';
 import { LAYOUT_LIMITS } from '@/shared/layout';
 import FileTreeNode from '../components/FileTreeNode.vue';
 import FileViewer from '../components/FileViewer.vue';
+import CommitList from '../components/CommitList.vue';
 import { api } from '../services/api';
 import { PALETTE_EVENTS } from '../services/command-palette';
 import { fuzzySearch, indexProjectTree, type SearchEntry } from '../services/file-search';
 import {
   activeGuardrails,
   clearWorkspace,
+  loadCommits,
   persist,
   persistLayout,
   resetLayout,
@@ -73,16 +75,20 @@ async function loadWorkspace() {
   localError.value = null;
   store.treeLoading = true;
   try {
-    const [tree, git, instructions] = await Promise.all([
+    const [tree, git, instructions, branches] = await Promise.all([
       api.scanProject(project.value, { showHidden: store.snapshot?.config.showHiddenFiles ?? false }),
       api.gitStatus(project.value),
       api.listInstructions(project.value),
+      api.gitBranches(project.value),
     ]);
     store.tree = tree;
     store.treeLoadedFor = project.value.id;
     searchIndex.value = indexProjectTree(tree);
     store.git = git;
     store.instructions = instructions;
+    store.branches = branches.branches;
+    store.selectedBranch = branches.current;
+    await loadCommits();
     if (store.instructions.length && !store.selectedInstructionPath) await selectInstruction(store.instructions[0].relativePath);
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error);
@@ -91,6 +97,8 @@ async function loadWorkspace() {
     store.treeLoading = false;
   }
 }
+
+
 
 async function addProject() {
   localError.value = null;
@@ -401,6 +409,22 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', endResize);
   window.removeEventListener('pointercancel', endResize);
 });
+
+async function saveExternalPaths() {
+  if (!project.value) return;
+  const paths = externalPathsText.value
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p);
+  project.value.allowedExternalPaths = paths;
+  await persist('projects', store.snapshot?.projects ?? []);
+  try {
+    await api.syncPermissions({ projectPath: project.value.path, allowedExternalPaths: paths });
+  } catch {
+    // ignore
+  }
+}
+
 </script>
 
 <template>
@@ -435,6 +459,7 @@ onBeforeUnmount(() => {
             <div class="workspace-tabs" role="tablist">
               <button class="workspace-tab" :class="{ active: store.workspaceTab === 'explorer' }" type="button" @click="selectWorkspaceTab('explorer')">{{ t('workspace.explorer') }}</button>
               <button class="workspace-tab" :class="{ active: store.workspaceTab === 'git' }" type="button" @click="selectWorkspaceTab('git')">{{ t('workspace.gitChanges') }} <span v-if="store.git?.changes.length" class="tab-count">{{ store.git.changes.length }}</span></button>
+              <button class="workspace-tab" :class="{ active: store.workspaceTab === 'commits' }" type="button" @click="selectWorkspaceTab('commits')">{{ t('commits.title') }}</button>
               <button class="workspace-tab" :class="{ active: store.workspaceTab === 'instructions' }" type="button" @click="selectWorkspaceTab('instructions')">{{ t('workspace.instructions') }} <span v-if="store.instructions.length" class="tab-count">{{ store.instructions.length }}</span></button>
             </div>
             <div class="toolbar-actions">
@@ -465,16 +490,19 @@ onBeforeUnmount(() => {
             <div v-else class="git-changes-layout"><div class="change-list"><div v-for="[label, changes] in groupedChanges" :key="label" class="change-group"><div class="change-group-label"><span>{{ label }}</span><span class="mono">{{ changes.length.toString().padStart(2, '0') }}</span></div><button v-for="change in changes" :key="`${change.path}-${change.kind}`" class="change-item" :class="`change-${change.kind}`" type="button" @click="selectChange(change)"><span class="change-marker">{{ change.kind === 'modified' ? 'M' : change.kind === 'added' ? 'A' : change.kind === 'deleted' ? 'D' : change.kind === 'renamed' ? 'R' : change.kind === 'untracked' ? '?' : '!' }}</span><span>{{ change.path }}</span><span v-if="change.staged" class="change-state mono">{{ t('git.staged') }}</span><span v-if="change.unstaged" class="change-state mono">{{ t('git.unstaged') }}</span></button></div></div><div class="diff-panel"><div v-if="diffLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('git.loadingDiff') }}</div><pre v-else-if="store.gitDiff" class="diff-content">{{ store.gitDiff.content }}</pre><div v-else class="viewer-message"><span class="empty-mark">±</span><strong>{{ t('git.selectChange') }}</strong><span>{{ t('git.selectChangeDetail') }}</span></div></div></div>
           </div>
 
+          <div v-else-if="store.workspaceTab === 'commits'" class="commits-layout">
+            <CommitList @refresh="loadCommits" />
+          </div>
+
           <div v-else class="instructions-layout">
             <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="requestInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
             <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !store.instructionDirty" @click="requestSaveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="store.instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="store.instructionDirty = true"></textarea><div class="editor-footer mono">{{ store.instructionDirty ? t('instructions.unsaved') : t('instructions.atomicNotice') }}</div></div>
             <div class="external-permissions-panel">
-            <div class="panel-toolbar"><span class="eyebrow">External directory access</span></div>
-            <p class="small muted">Allow OpenCode to access external directories for this project (project scope). Add one per line.</p>
-            <textarea v-model="externalPathsText" rows="4" class="instruction-textarea" placeholder="/Users/christiankaal/Code/CardGames/*&#10;/Users/christiankaal/Code/Other/*"></textarea>
-            <button class="primary-button" type="button" @click="saveExternalPaths">Save permissions</button>
-          </div>
-
+              <div class="panel-toolbar"><span class="eyebrow">External directory access</span></div>
+              <p class="small muted">Allow OpenCode to access external directories for this project (project scope). Add one per line.</p>
+              <textarea v-model="externalPathsText" rows="4" class="instruction-textarea" placeholder="/Users/christiankaal/Code/CardGames/*&#10;/Users/christiankaal/Code/Other/*"></textarea>
+              <button class="primary-button" type="button" @click="saveExternalPaths">Save permissions</button>
+            </div>
           </div>
         </template>
       </section>
@@ -483,17 +511,4 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
-async function saveExternalPaths() {
-  if (!project.value) return;
-  const paths = externalPathsText.value
-    .split(/\n+/)
-    .map((p) => p.trim())
-    .filter((p) => p);
-  project.value.allowedExternalPaths = paths;
-  await persist('projects', store.snapshot?.projects ?? []);
-  try {
-    await api.syncPermissions({ project: project.value, allowedExternalPaths: paths, allowedExternalPathsGlobal: store.snapshot?.config.allowedExternalPathsGlobal || [] });
-  } catch (e) {
-    // ignore
-  }
-}
+

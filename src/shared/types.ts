@@ -435,5 +435,6 @@ export interface AgentSmithApi {
   startProcess(request: AgentExecutionRequest): Promise<{ executionId: string; jobId?: string; command: string | null }>;
   cancelProcess(executionId: string): Promise<void>;
   listPromptJobs(): Promise<PromptJob[]>;
+  syncPermissions(payload: { projectPath?: string; allowedExternalPaths?: string[] }): Promise<{ ok: boolean }>;
   onProcessEvent(callback: (event: ExecutionEvent) => void): () => void;
 }

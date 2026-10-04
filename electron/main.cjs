@@ -77,14 +77,14 @@ app.whenReady().then(async () => {
     try {
       const asPerms = buildExternalPermissions([...allowedExternalPathsGlobal, ...(project?.allowedExternalPaths || [])]);
       await writeOpencodeJsonc(asRoot, asPerms);
-    } catch (e) {
+    } catch {
       // ignore
     }
     // External repo if requested
     if (writeExternalRepo && project?.path) {
       try {
         await writeOpencodeJsonc(project.path, buildExternalPermissions(project.allowedExternalPaths || allowedExternalPaths));
-      } catch (e) {
+      } catch {
         // ignore
       }
     }

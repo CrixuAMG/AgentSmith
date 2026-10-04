@@ -11,16 +11,12 @@ export function normalizeExternalPath(p: string): string {
   // Ensure we end with /* for directories we want to allow, or keep as-is
   if (cleaned.endsWith('/*') || cleaned.endsWith('*')) return cleaned;
   // If it's a directory, add /*
-  try {
-    // In renderer we won't stat, but in main process we could; keep simple heuristic
-    if (!cleaned.includes('.')) return cleaned.endsWith('/') ? cleaned + '*' : cleaned + '/*';
-  } catch (e) {
-    // ignore
-  }
+  // In renderer we won't stat, but in main process we could; keep simple heuristic
+  if (!cleaned.includes('.')) return cleaned.endsWith('/') ? cleaned + '*' : cleaned + '/*';
   return cleaned;
 }
 
-export function mergePermissions(existing: Record<string, string> = {}, additions: string[], scope: 'project' | 'global'): Record<string, string> {
+export function mergePermissions(existing: Record<string, string> = {}, additions: string[]): Record<string, string> {
   const result = { ...existing };
   for (const add of additions) {
     const norm = normalizeExternalPath(add);
@@ -41,9 +37,5 @@ export async function writeOpencodePermissions(targetDir: string, permissions: R
   }
 }
 `;
-  try {
-    await fs.writeFile(file, content, 'utf8');
-  } catch (e) {
-    throw e;
-  }
+  await fs.writeFile(file, content, 'utf8');
 }
