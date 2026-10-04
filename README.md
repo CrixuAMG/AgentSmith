@@ -40,6 +40,7 @@ Writes are versioned, validated, backed up, and performed through a temporary fi
 * Deterministic Prompt Studio composition with section-by-section preview, provider instructions, standard manifest context, guarded multi-file selection, and copy support.
 * **Make a suggestion** on the task editor: a role-aware feature-proposal prompt that can be regenerated, accepted into the task, and reviewed before anything runs.
 * Explicit process confirmation, streaming stdout/stderr, exit status, and cancellation.
+* Readable provider jobs with ANSI-cleaned output and separate Agent output, logs, errors, and system filters.
 * English i18n resources, locale-ready formatting, and dark/light theme support.
 
 ## Feature Suggestions

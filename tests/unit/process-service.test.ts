@@ -3,13 +3,14 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs, hydrateJobs, listPromptJobs, providerEnvironment } = require('../../electron/process-service.cjs') as {
+const { evaluateExecutionGuardrails, closeProcessInput, normalizeMaxConcurrentJobs, hydrateJobs, listPromptJobs, providerEnvironment, stripAnsi } = require('../../electron/process-service.cjs') as {
   evaluateExecutionGuardrails: (request: { prompt: string; guardrailProfile?: { rules: Array<Record<string, unknown>> } }) => void;
   closeProcessInput: (child: { stdin?: { end: () => void } | null }) => void;
   normalizeMaxConcurrentJobs: (value: unknown) => number;
   hydrateJobs: (records: Array<Record<string, unknown>>) => void;
   listPromptJobs: () => Array<Record<string, unknown>>;
   providerEnvironment: (environment: Record<string, string>) => Record<string, string>;
+  stripAnsi: (value: string) => string;
 };
 
 describe('execution guardrails', () => {
@@ -34,6 +35,10 @@ describe('execution guardrails', () => {
 
   it('keeps hosted repository credentials out of provider environments', () => {
     expect(providerEnvironment({ AGENTSMITH_GITHUB_TOKEN: 'secret', AGENTSMITH_GITLAB_TOKEN: 'secret', PATH: '/bin' })).toEqual({ PATH: '/bin' });
+  });
+
+  it('removes terminal control sequences from provider output', () => {
+    expect(stripAnsi('\u001b[31mError\u001b[0m\r\nnext\u001b]8;;https://example.test\u0007link\u001b]8;;\u0007')).toBe('Error\nnextlink');
   });
 
   it('normalizes the configured concurrency limit to a safe range', () => {

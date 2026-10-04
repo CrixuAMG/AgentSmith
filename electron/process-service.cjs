@@ -13,6 +13,9 @@ const cancellationTimers = new Map();
 const cancellationGracePeriod = 2000;
 const defaultMaxConcurrentJobs = 2;
 const maxOutputBytes = 256 * 1024;
+// Terminal control characters are intentional here because this is the output sanitizer.
+// eslint-disable-next-line no-control-regex
+const ansiPattern = /(?:\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]|\u009b[0-?]*[ -/]*[@-~])/g;
 let persistTimer = null;
 
 function normalizeMaxConcurrentJobs(value) {
@@ -26,6 +29,10 @@ function closeProcessInput(child) {
 
 function providerEnvironment(environment = process.env) {
   return Object.fromEntries(Object.entries(environment).filter(([key]) => !/^AGENTSMITH_(?:GITHUB|GITLAB)_TOKEN$/.test(key)));
+}
+
+function stripAnsi(value) {
+  return String(value).replace(ansiPattern, '').replace(/\r\n?/g, '\n');
 }
 
 function now() {
@@ -50,7 +57,12 @@ function listPromptJobs() {
 function hydrateJobs(records = []) {
   jobRecords.clear();
   for (const record of Array.isArray(records) ? records : []) {
-    const hydrated = { ...record, output: Array.isArray(record.output) ? record.output : [] };
+    const hydrated = {
+      ...record,
+      output: Array.isArray(record.output)
+        ? record.output.map((line) => ({ ...line, text: stripAnsi(line.text ?? '') }))
+        : [],
+    };
     if (['queued', 'starting', 'running'].includes(hydrated.state)) {
       hydrated.state = 'interrupted';
       hydrated.error = 'Execution was interrupted when AgentSmith restarted.';
@@ -64,7 +76,8 @@ function hydrateJobs(records = []) {
 }
 
 function appendOutput(record, kind, text) {
-  if (!text) return { text: '', truncated: false };
+  const cleanText = stripAnsi(text ?? '');
+  if (!cleanText) return { text: '', truncated: false };
   const remaining = maxOutputBytes - (record.outputBytes || 0);
   if (remaining <= 0) {
     if (!record.outputTruncated) {
@@ -73,7 +86,7 @@ function appendOutput(record, kind, text) {
     }
     return { text: '', truncated: false };
   }
-  const source = Buffer.from(String(text), 'utf8');
+  const source = Buffer.from(cleanText, 'utf8');
   const accepted = source.length <= remaining ? source : source.subarray(0, remaining);
   const acceptedText = accepted.toString('utf8');
   record.outputBytes = (record.outputBytes || 0) + accepted.length;
@@ -86,6 +99,7 @@ function appendOutput(record, kind, text) {
 }
 
 function sendEvent(record, emit, payload) {
+  if (typeof payload.text === 'string') payload = { ...payload, text: stripAnsi(payload.text) };
   const timestamp = now();
   if (payload.kind === 'queued') record.state = 'queued';
   if (payload.kind === 'starting') record.state = 'starting';
@@ -269,6 +283,7 @@ module.exports = {
   evaluateExecutionGuardrails,
   closeProcessInput,
   providerEnvironment,
+  stripAnsi,
   normalizeMaxConcurrentJobs,
   listPromptJobs,
   hydrateJobs,
