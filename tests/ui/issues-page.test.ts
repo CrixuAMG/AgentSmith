@@ -127,6 +127,7 @@ describe('issues page', () => {
   it('shows the linked repository and the capabilities read from AGENTS.md', async () => {
     const wrapper = await mountPage();
     expect(wrapper.find('.issues-connection-grid').text()).toContain('example/agent');
+    expect(wrapper.find('.issues-connection-grid').text()).toContain('Issues: Read and write');
 
     const permissions = wrapper.findAll('.prompt-card')[2].text();
     expect(permissions).toContain('allowed');

@@ -547,6 +547,7 @@ onUnmounted(() => removeProcessListener?.());
           <label class="form-field"><span>{{ t('issues.token') }}</span><input v-model="tokenDraft" type="password" autocomplete="off" :placeholder="t('issues.tokenPlaceholder')" :disabled="busy"></label>
           <div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="busy || !tokenDraft.trim()" @click="connect">{{ t('issues.connect') }}</button><button class="quiet-button" type="button" :disabled="busy || credentialState?.source !== 'session'" @click="disconnect">{{ t('issues.clearCredential') }}</button><button class="quiet-button" type="button" :disabled="discovering" @click="discover"><span v-if="discovering" class="loading-pulse"></span>{{ t('issues.verify') }}</button></div>
           <p v-if="discovery?.note" class="muted-copy">{{ discovery.note }}</p>
+          <p class="muted-copy">{{ t('issues.tokenPermissions') }}</p>
           <p v-if="connected" class="toolbar-status"><span class="status-dot"></span>{{ t('issues.connectedAs', { account: discovery?.installation.account ?? '' }) }}</p>
         </section>
 
