@@ -158,6 +158,7 @@ export function toPlainIpcValue<T>(value: T): T {
 }
 
 function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
+  type PermissionSyncPayload = Parameters<AgentSmithApi['syncPermissions']>[0];
   return {
     ...bridge,
     saveResource: (key, value) => bridge.saveResource(key, toPlainIpcValue(value)),
@@ -179,7 +180,7 @@ function desktopApi(bridge: AgentSmithApi): AgentSmithApi {
     saveSuggestion: (project, content) => bridge.saveSuggestion(toPlainIpcValue(project), content),
     startProcess: (request) => bridge.startProcess(toPlainIpcValue(request)),
     listPromptJobs: () => bridge.listPromptJobs(),
-    syncPermissions: (payload: any) => bridge.syncPermissions(toPlainIpcValue(payload)),
+    syncPermissions: (payload: PermissionSyncPayload) => bridge.syncPermissions(toPlainIpcValue(payload)),
   };
 }
 

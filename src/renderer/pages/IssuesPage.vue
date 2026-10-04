@@ -279,6 +279,7 @@ async function analyzeCurrentProject() {
   analysisOutput.value = '';
   analysisPrompt.value = '';
   analysisExecutionId.value = null;
+  analysisJobId.value = null;
   analysisProposals.value = [];
   selectedProposalIds.value = [];
   createdIssues.value = [];
@@ -288,6 +289,7 @@ async function analyzeCurrentProject() {
     const composed = composeIssueAuditPrompt({ project: targetProject, link: targetLink, ...context });
     analysisPrompt.value = composed.text;
     const jobId = `issue-analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    analysisJobId.value = jobId;
     const guardrails = activeGuardrails();
     addPromptJob({
       id: jobId,
@@ -324,8 +326,9 @@ async function analyzeCurrentProject() {
   }
 }
 
-function handleAnalysisEvent(event: { executionId: string; kind: string; text?: string }) {
+function handleAnalysisEvent(event: { executionId: string; jobId?: string; kind: string; text?: string }) {
   if (!analysisBusy.value) return;
+  if (analysisJobId.value && event.jobId && event.jobId !== analysisJobId.value) return;
   // A queued process event can arrive before startProcess resolves with the ID. The
   // event itself is the authoritative ID for this analysis run.
   if (!analysisExecutionId.value) analysisExecutionId.value = event.executionId;
@@ -339,6 +342,7 @@ function handleAnalysisEvent(event: { executionId: string; kind: string; text?: 
   if (event.kind === 'completed') {
     analysisBusy.value = false;
     analysisExecutionId.value = null;
+    analysisJobId.value = null;
     const parsed = parseIssueProposals(analysisOutput.value);
     analysisProposals.value = parsed.proposals;
     selectedProposalIds.value = parsed.proposals.map((proposal) => proposal.id);
@@ -348,13 +352,18 @@ function handleAnalysisEvent(event: { executionId: string; kind: string; text?: 
   if (event.kind === 'failed' || event.kind === 'cancelled') {
     analysisBusy.value = false;
     analysisExecutionId.value = null;
+    analysisJobId.value = null;
     analysisError.value = event.text ?? t('issues.analysisFailed');
   }
 }
 
 async function cancelAnalysis() {
   if (!analysisExecutionId.value) return;
-  await api.cancelProcess(analysisExecutionId.value);
+  try {
+    await api.cancelProcess(analysisExecutionId.value);
+  } catch (error) {
+    analysisError.value = messageOf(error);
+  }
 }
 
 async function createSelectedIssues() {
@@ -372,6 +381,7 @@ async function createSelectedIssues() {
   analysisError.value = null;
   creationErrors.value = [];
   createdIssues.value = [];
+  const createdProposalIds = new Set<string>();
   try {
     for (const proposal of selected) {
       try {
@@ -380,13 +390,16 @@ async function createSelectedIssues() {
           body: proposal.body,
           labels: proposal.labels,
         });
-        if (result.ok && result.issue) createdIssues.value.push(result.issue);
+        if (result.ok && result.issue) {
+          createdIssues.value.push(result.issue);
+          createdProposalIds.add(proposal.id);
+        }
         else creationErrors.value.push(result.error ?? t('issues.saveFailed'));
       } catch (error) {
         creationErrors.value.push(messageOf(error));
       }
     }
-    selectedProposalIds.value = selected.filter((proposal) => !createdIssues.value.some((issue) => issue.title === proposal.title)).map((proposal) => proposal.id);
+    selectedProposalIds.value = selected.filter((proposal) => !createdProposalIds.has(proposal.id)).map((proposal) => proposal.id);
     if (createdIssues.value.length) {
       status.value = t('issues.batchCreated', { count: createdIssues.value.length });
       await loadIssues();
@@ -484,6 +497,8 @@ watch(project, async () => {
   analysisError.value = null;
   analysisOutput.value = '';
   analysisPrompt.value = '';
+  analysisExecutionId.value = null;
+  analysisJobId.value = null;
   analysisProposals.value = [];
   selectedProposalIds.value = [];
   createdIssues.value = [];

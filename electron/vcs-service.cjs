@@ -34,11 +34,11 @@ function messageOf(error) {
 function credentialFor(providerId) {
   const session = sessionCredentials.get(providerId);
   if (session) return { token: session, source: 'session' };
-  if (providerId === 'github' && process.env.AGENTSMITH_GITHUB_TOKEN) {
-    return { token: process.env.AGENTSMITH_GITHUB_TOKEN, source: 'environment' };
+  if (providerId === 'github' && process.env.AGENTSMITH_GITHUB_TOKEN?.trim()) {
+    return { token: process.env.AGENTSMITH_GITHUB_TOKEN.trim(), source: 'environment' };
   }
-  if (providerId === 'gitlab' && process.env.AGENTSMITH_GITLAB_TOKEN) {
-    return { token: process.env.AGENTSMITH_GITLAB_TOKEN, source: 'environment' };
+  if (providerId === 'gitlab' && process.env.AGENTSMITH_GITLAB_TOKEN?.trim()) {
+    return { token: process.env.AGENTSMITH_GITLAB_TOKEN.trim(), source: 'environment' };
   }
   return { token: null, source: 'none' };
 }
@@ -215,7 +215,7 @@ function validateDraft(draft) {
   const body = typeof draft?.body === 'string' ? draft.body : '';
   if (body.length > MAX_ISSUE_BODY_CHARS) return { error: `An issue description cannot exceed ${MAX_ISSUE_BODY_CHARS} characters.` };
   const labels = Array.isArray(draft?.labels)
-    ? draft.labels.filter((label) => typeof label === 'string' && label.trim()).map((label) => label.trim()).slice(0, MAX_LABELS)
+    ? draft.labels.filter((label) => typeof label === 'string' && label.trim()).map((label) => label.trim()).filter((label) => label.length <= 100).slice(0, MAX_LABELS)
     : [];
   return { error: null, draft: { title, body, labels } };
 }
@@ -267,7 +267,7 @@ async function updateRepositoryIssue(project, number, patch) {
   }
   if (patch.labels !== undefined) {
     if (!Array.isArray(patch.labels)) return { ok: false, issue: null, error: 'Issue labels must be a list of names.' };
-    body.labels = patch.labels.filter((label) => typeof label === 'string' && label.trim()).map((label) => label.trim()).slice(0, MAX_LABELS);
+    body.labels = patch.labels.filter((label) => typeof label === 'string' && label.trim()).map((label) => label.trim()).filter((label) => label.length <= 100).slice(0, MAX_LABELS);
   }
   if (!Object.keys(body).length) return { ok: false, issue: null, error: 'Nothing to change on this issue.' };
   const response = await request(link, `/repos/${link.owner}/${link.name}/issues/${number}`, { method: 'PATCH', body });

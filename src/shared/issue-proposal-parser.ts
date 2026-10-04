@@ -14,6 +14,7 @@ export const MAX_ISSUE_PROPOSALS = 20;
 const MAX_TITLE_CHARS = 256;
 const MAX_BODY_CHARS = 65536;
 const MAX_LABELS = 20;
+const MAX_LABEL_CHARS = 100;
 
 function balancedJson(text: string, start: number): string | null {
   const opening = text[start];
@@ -77,6 +78,7 @@ function normalizeProposal(value: unknown, index: number): ParsedIssueProposal |
     ? source.labels
       .filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
       .map((label) => label.trim())
+      .filter((label) => label.length <= MAX_LABEL_CHARS)
       .slice(0, MAX_LABELS)
     : [];
   return { id: `issue-proposal-${index + 1}`, title, body, labels };
@@ -113,7 +115,7 @@ export function parseIssueProposals(text: string): IssueProposalParseResult {
       proposals.push(proposal);
     }
     if (proposals.length) return { proposals, error: null };
-    return { proposals: [], error: 'The provider returned JSON, but no valid issue proposals were found.' };
+    continue;
   }
   return {
     proposals: [],
