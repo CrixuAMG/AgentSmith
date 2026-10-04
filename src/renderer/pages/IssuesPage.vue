@@ -547,7 +547,7 @@ onUnmounted(() => removeProcessListener?.());
         <section class="prompt-card">
           <div class="prompt-card-heading"><span class="eyebrow">{{ t('issues.credential') }}</span><span class="mono">{{ credentialState?.configured ? credentialState.source.toUpperCase() : 'NONE' }}</span></div>
           <p class="muted-copy">{{ t('issues.credentialDetail') }}</p>
-<label class="form-field"><span>{{ t('issues.token') }}</span><input v-model="tokenDraft" type="password" autocomplete="off" :placeholder="t('issues.tokenPlaceholder')" :disabled="busy"></label>
+          <label class="form-field"><span>{{ t('issues.token') }}</span><input v-model="tokenDraft" type="password" autocomplete="off" :placeholder="t('issues.tokenPlaceholder')" :disabled="busy"></label>
           <label class="check-field"><input v-model="rememberToken" type="checkbox" :disabled="busy"><span>{{ t('issues.rememberToken') }}</span></label>
           <div class="task-footer-actions"><button class="secondary-button" type="button" :disabled="busy || !tokenDraft.trim()" @click="connect">{{ t('issues.connect') }}</button><button class="quiet-button" type="button" :disabled="busy || !credentialState?.configured" @click="disconnect">{{ t('issues.clearCredential') }}</button><button class="quiet-button" type="button" :disabled="discovering" @click="discover"><span v-if="discovering" class="loading-pulse"></span>{{ t('issues.verify') }}</button></div>
           <p class="muted-copy mono prompt-path">{{ t('issues.credentialFile', { path: credentialPath }) }}</p>
