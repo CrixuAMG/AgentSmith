@@ -38,6 +38,10 @@ const draftPromptOpen = ref(false);
 const draftPromptMode = ref<'switch' | 'overwrite'>('switch');
 const pendingDraftAction = ref<(() => Promise<void>) | null>(null);
 const diffLoading = ref(false);
+const instructionSaving = ref(false);
+const instructionError = ref<string | null>(null);
+const externalSaving = ref(false);
+const externalError = ref<string | null>(null);
 const treePanel = ref<HTMLElement | null>(null);
 const resizing = ref<'rail' | 'explorer' | null>(null);
 
@@ -225,6 +229,8 @@ async function selectInstruction(relativePath: string) {
 
 async function saveInstruction(force = false): Promise<boolean> {
   if (!project.value || !store.selectedInstructionPath) return false;
+  instructionSaving.value = true;
+  instructionError.value = null;
   try {
     const existing = store.instructions.some((item) => item.relativePath === store.selectedInstructionPath);
     if (existing && !force) {
@@ -238,8 +244,10 @@ async function saveInstruction(force = false): Promise<boolean> {
     store.instructions = await api.listInstructions(project.value);
     return true;
   } catch (error) {
-    localError.value = error instanceof Error ? error.message : String(error);
+    instructionError.value = error instanceof Error ? error.message : String(error);
     return false;
+  } finally {
+    instructionSaving.value = false;
   }
 }
 
@@ -413,24 +421,28 @@ onBeforeUnmount(() => {
 
 async function saveExternalPaths() {
   if (!project.value) return;
+  externalSaving.value = true;
+  externalError.value = null;
   const paths = externalPathsText.value
     .split(/\n+/)
     .map((p) => p.trim())
     .filter((p) => p);
   try {
-    if (paths.some((item) => !isValidExternalPath(item))) throw new Error('Each permission must be an absolute directory or file path.');
+    if (paths.some((item) => !isValidExternalPath(item))) throw new Error(t('permissions.invalidPath'));
     const normalized = [...new Set(paths.map(normalizeExternalPath))];
+    const projects = (store.snapshot?.projects ?? []).map((item) => item.id === project.value?.id ? { ...item, allowedExternalPaths: normalized } : item);
+    await persist('projects', projects);
     project.value.allowedExternalPaths = normalized;
-    await persist('projects', store.snapshot?.projects ?? []);
     const result = await api.syncPermissions({
       project: project.value,
       allowedExternalPaths: normalized,
       allowedExternalPathsGlobal: store.snapshot?.config.allowedExternalPathsGlobal ?? [],
     });
     if (!result.ok) throw new Error('Permission files could not be written.');
-    localError.value = null;
   } catch (saveError) {
-    localError.value = saveError instanceof Error ? saveError.message : String(saveError);
+    externalError.value = saveError instanceof Error ? saveError.message : String(saveError);
+  } finally {
+    externalSaving.value = false;
   }
 }
 
@@ -505,12 +517,13 @@ async function saveExternalPaths() {
 
           <div v-else class="instructions-layout">
             <div class="instructions-list"><div class="panel-toolbar"><span class="eyebrow">{{ t('instructions.discovered') }}</span></div><div v-if="instructionOverlapWarning" class="instructions-warning" role="status">{{ instructionOverlapWarning }}</div><button v-for="item in store.instructions" :key="item.relativePath" class="instruction-item" :class="{ selected: item.relativePath === store.selectedInstructionPath }" type="button" @click="requestInstruction(item.relativePath)"><span class="instruction-scope">{{ item.scope === 'global' ? 'G' : item.scope === 'project' ? 'P' : 'N' }}</span><span><strong>{{ item.relativePath }}</strong><small>{{ t(`instructions.scope.${item.scope}`) }}</small></span></button><div v-if="!store.instructions.length" class="rail-empty"><span class="empty-mark">//</span><span>{{ t('instructions.empty') }}</span></div><div class="new-instruction"><label class="field-label" for="new-instruction">{{ t('instructions.newPath') }}</label><div class="inline-field"><input id="new-instruction" v-model="newInstructionPath" type="text" :placeholder="t('instructions.pathPlaceholder')"><button class="small-primary-button" type="button" @click="createInstruction">+</button></div></div></div>
-            <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" type="button" :disabled="!store.selectedInstructionPath || !store.instructionDirty" @click="requestSaveInstruction">{{ t('common.save') }}</button></div><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="store.instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="store.instructionDirty = true"></textarea><div class="editor-footer mono">{{ store.instructionDirty ? t('instructions.unsaved') : t('instructions.atomicNotice') }}</div></div>
+             <div class="instruction-editor"><div class="editor-header"><div><span class="eyebrow">{{ t('instructions.editor') }}</span><strong>{{ store.selectedInstructionPath ?? t('instructions.select') }}</strong></div><button class="primary-button" :class="{ 'retry-action': instructionError }" type="button" :disabled="!store.selectedInstructionPath || !store.instructionDirty || instructionSaving" @click="requestSaveInstruction">{{ instructionSaving ? t('common.saving') : instructionError ? t('common.retry') : t('common.save') }}</button></div><p v-if="instructionError" class="inline-error" role="alert">{{ instructionError }}</p><div v-if="store.instructionLoading" class="viewer-message"><span class="loading-pulse"></span>{{ t('common.loading') }}</div><textarea v-else v-model="store.instructionDraft" class="instruction-textarea" :placeholder="t('instructions.editorPlaceholder')" @input="store.instructionDirty = true; instructionError = null"></textarea><div class="editor-footer mono">{{ store.instructionDirty ? t('instructions.unsaved') : t('instructions.atomicNotice') }}</div></div>
             <div class="external-permissions-panel">
               <div class="panel-toolbar"><span class="eyebrow">External directory access</span></div>
               <p class="small muted">Allow OpenCode to access external directories for this project (project scope). Add one per line.</p>
               <textarea v-model="externalPathsText" rows="4" class="instruction-textarea" placeholder="/Users/christiankaal/Code/CardGames/*&#10;/Users/christiankaal/Code/Other/*"></textarea>
-              <button class="primary-button" type="button" @click="saveExternalPaths">Save permissions</button>
+               <p v-if="externalError" class="inline-error" role="alert">{{ externalError }}</p>
+               <button class="primary-button" :class="{ 'retry-action': externalError }" type="button" :disabled="externalSaving" @click="saveExternalPaths">{{ externalSaving ? t('common.saving') : externalError ? t('common.retry') : t('permissions.save') }}</button>
             </div>
           </div>
         </template>

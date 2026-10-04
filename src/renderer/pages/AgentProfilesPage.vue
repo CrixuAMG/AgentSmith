@@ -17,6 +17,8 @@ const profileDraft = ref<AgentProfile | null>(null);
 const selectedRoleId = ref<string | null>(null);
 const roleDraft = ref<Role | null>(null);
 const savedState = ref(true);
+const saving = ref(false);
+const saveError = ref<string | null>(null);
 const roleInstructions = computed({
   get: () => roleDraft.value?.instructions.join('\n') ?? '',
   set: (value: string) => { if (roleDraft.value) roleDraft.value.instructions = value.split('\n').map((line) => line.trim()).filter(Boolean); },
@@ -65,6 +67,7 @@ function selectProfile(profile: AgentProfile) {
   selectedProfileId.value = profile.id;
   profileDraft.value = cloneProfile(profile);
   savedState.value = true;
+  saveError.value = null;
 }
 
 function newProfile() {
@@ -83,13 +86,20 @@ function toggleGoal(goalId: string) {
 
 async function saveProfile() {
   if (!store.snapshot || !profileDraft.value || !profileDraft.value.name.trim()) return;
+  saving.value = true;
+  saveError.value = null;
   profileDraft.value.name = profileDraft.value.name.trim();
   const existingIndex = store.snapshot.profiles.findIndex((profile) => profile.id === profileDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.profiles.push(cloneProfile(profileDraft.value));
-  else store.snapshot.profiles[existingIndex] = cloneProfile(profileDraft.value);
-  selectedProfileId.value = profileDraft.value.id;
-  await persist('profiles', store.snapshot.profiles);
-  selectProfile(store.snapshot.profiles.find((profile) => profile.id === profileDraft.value?.id)!);
+  const profiles = [...store.snapshot.profiles];
+  if (existingIndex === -1) profiles.push(cloneProfile(profileDraft.value));
+  else profiles[existingIndex] = cloneProfile(profileDraft.value);
+  try {
+    await persist('profiles', profiles);
+    store.snapshot.profiles = profiles;
+    selectedProfileId.value = profileDraft.value.id;
+    selectProfile(store.snapshot.profiles.find((profile) => profile.id === profileDraft.value?.id)!);
+  } catch (error) { saveError.value = error instanceof Error ? error.message : String(error); }
+  finally { saving.value = false; }
 }
 
 async function deleteProfile() {
@@ -120,13 +130,20 @@ function newRole() {
 
 async function saveRole() {
   if (!store.snapshot || !roleDraft.value || !roleDraft.value.name.trim()) return;
+  saving.value = true;
+  saveError.value = null;
   roleDraft.value.name = roleDraft.value.name.trim();
   const existingIndex = store.snapshot.roles.findIndex((role) => role.id === roleDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.roles.push(structuredClone(toRaw(roleDraft.value)));
-  else store.snapshot.roles[existingIndex] = structuredClone(toRaw(roleDraft.value));
-  selectedRoleId.value = roleDraft.value.id;
-  await persist('roles', store.snapshot.roles);
-  selectRole(store.snapshot.roles.find((role) => role.id === roleDraft.value?.id)!);
+  const roles = [...store.snapshot.roles];
+  if (existingIndex === -1) roles.push(structuredClone(toRaw(roleDraft.value)));
+  else roles[existingIndex] = structuredClone(toRaw(roleDraft.value));
+  try {
+    await persist('roles', roles);
+    store.snapshot.roles = roles;
+    selectedRoleId.value = roleDraft.value.id;
+    selectRole(store.snapshot.roles.find((role) => role.id === roleDraft.value?.id)!);
+  } catch (error) { saveError.value = error instanceof Error ? error.message : String(error); }
+  finally { saving.value = false; }
 }
 
 async function deleteRole() {
@@ -152,6 +169,7 @@ onMounted(discover);
 
 <template>
   <div class="profiles-page">
+    <div v-if="saveError" class="inline-error" role="alert">{{ saveError }}</div>
     <div class="page-heading"><div><span class="eyebrow">{{ t('profiles.eyebrow') }}</span><h1>{{ t('profiles.title') }}</h1><p class="lead">{{ t('profiles.intro') }}</p></div></div>
     <div class="section-tabs"><button class="section-tab" :class="{ active: activeTab === 'providers' }" type="button" @click="activeTab = 'providers'">{{ t('profiles.providersTab') }}</button><button class="section-tab" :class="{ active: activeTab === 'profiles' }" type="button" @click="activeTab = 'profiles'">{{ t('profiles.profilesTab') }}</button><button class="section-tab" :class="{ active: activeTab === 'roles' }" type="button" @click="activeTab = 'roles'">{{ t('profiles.rolesTab') }}</button></div>
 

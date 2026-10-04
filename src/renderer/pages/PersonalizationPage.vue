@@ -12,6 +12,8 @@ const goalDraft = ref<Goal | null>(null);
 const selectedGuardrailId = ref<string | null>(null);
 const guardrailDraft = ref<GuardrailProfile | null>(null);
 const savedState = ref(true);
+const saving = ref(false);
+const saveError = ref<string | null>(null);
 
 const goals = computed(() => [...(store.snapshot?.goals ?? [])].sort((left, right) => left.order - right.order));
 const guardrails = computed(() => store.snapshot?.guardrails ?? []);
@@ -37,6 +39,7 @@ function selectGoal(goal: Goal) {
   selectedGoalId.value = goal.id;
   goalDraft.value = cloneGoal(goal);
   savedState.value = true;
+  saveError.value = null;
 }
 
 function newGoal() {
@@ -48,13 +51,16 @@ function newGoal() {
 
 async function saveGoal() {
   if (!store.snapshot || !goalDraft.value || !goalDraft.value.name.trim()) return;
+  saving.value = true;
+  saveError.value = null;
   goalDraft.value.name = goalDraft.value.name.trim();
   const existingIndex = store.snapshot.goals.findIndex((goal) => goal.id === goalDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.goals.push(cloneGoal(goalDraft.value));
-  else store.snapshot.goals[existingIndex] = cloneGoal(goalDraft.value);
-  selectedGoalId.value = goalDraft.value.id;
-  await persist('goals', store.snapshot.goals);
-  selectGoal(store.snapshot.goals.find((goal) => goal.id === goalDraft.value?.id)!);
+  const goals = [...store.snapshot.goals];
+  if (existingIndex === -1) goals.push(cloneGoal(goalDraft.value));
+  else goals[existingIndex] = cloneGoal(goalDraft.value);
+  try { await persist('goals', goals); store.snapshot.goals = goals; selectedGoalId.value = goalDraft.value.id; selectGoal(store.snapshot.goals.find((goal) => goal.id === goalDraft.value?.id)!); }
+  catch (error) { saveError.value = error instanceof Error ? error.message : String(error); }
+  finally { saving.value = false; }
 }
 
 async function deleteGoal() {
@@ -105,13 +111,16 @@ function removeRule(ruleId: string) {
 
 async function saveGuardrail() {
   if (!store.snapshot || !guardrailDraft.value || !guardrailDraft.value.name.trim()) return;
+  saving.value = true;
+  saveError.value = null;
   guardrailDraft.value.name = guardrailDraft.value.name.trim();
   const existingIndex = store.snapshot.guardrails.findIndex((profile) => profile.id === guardrailDraft.value?.id);
-  if (existingIndex === -1) store.snapshot.guardrails.push(cloneGuardrail(guardrailDraft.value));
-  else store.snapshot.guardrails[existingIndex] = cloneGuardrail(guardrailDraft.value);
-  selectedGuardrailId.value = guardrailDraft.value.id;
-  await persist('guardrails', store.snapshot.guardrails);
-  selectGuardrail(store.snapshot.guardrails.find((profile) => profile.id === guardrailDraft.value?.id)!);
+  const guardrails = [...store.snapshot.guardrails];
+  if (existingIndex === -1) guardrails.push(cloneGuardrail(guardrailDraft.value));
+  else guardrails[existingIndex] = cloneGuardrail(guardrailDraft.value);
+  try { await persist('guardrails', guardrails); store.snapshot.guardrails = guardrails; selectedGuardrailId.value = guardrailDraft.value.id; selectGuardrail(store.snapshot.guardrails.find((profile) => profile.id === guardrailDraft.value?.id)!); }
+  catch (error) { saveError.value = error instanceof Error ? error.message : String(error); }
+  finally { saving.value = false; }
 }
 
 async function deleteGuardrail() {
@@ -133,6 +142,7 @@ if (guardrails.value[0]) selectGuardrail(guardrails.value[0]);
 
 <template>
   <div class="personalization-page">
+    <div v-if="saveError" class="inline-error" role="alert">{{ saveError }}</div>
     <div class="page-heading"><div><span class="eyebrow">{{ t('personalization.eyebrow') }}</span><h1>{{ t('personalization.title') }}</h1><p class="lead">{{ t('personalization.intro') }}</p></div></div>
     <div class="section-tabs"><button class="section-tab" :class="{ active: activeTab === 'goals' }" type="button" @click="activeTab = 'goals'">{{ t('personalization.goalsTab') }}</button><button class="section-tab" :class="{ active: activeTab === 'guardrails' }" type="button" @click="activeTab = 'guardrails'">{{ t('personalization.guardrailsTab') }}</button></div>
 

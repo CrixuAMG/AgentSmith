@@ -10,6 +10,10 @@ const globalDraft = ref(store.snapshot?.globalInstructions ?? '');
 const globalSaved = ref(true);
 const providerDrafts = ref<Record<string, string>>({ ...(store.snapshot?.providerInstructions ?? {}) });
 const providerSaved = ref<Record<string, boolean>>({});
+const globalSaving = ref(false);
+const globalError = ref<string | null>(null);
+const providerSaving = ref<Record<string, boolean>>({});
+const providerErrors = ref<Record<string, string | null>>({});
 
 async function updateTheme() {
   if (!store.snapshot) return;
@@ -38,16 +42,29 @@ async function updateMaxConcurrentJobs() {
 
 async function saveGlobalInstructions() {
   if (!store.snapshot) return;
-  store.snapshot.globalInstructions = globalDraft.value;
-  await persist('globalInstructions', globalDraft.value);
-  globalSaved.value = true;
+  globalSaving.value = true;
+  globalError.value = null;
+  try {
+    await persist('globalInstructions', globalDraft.value);
+    store.snapshot.globalInstructions = globalDraft.value;
+    globalSaved.value = true;
+  } catch (error) {
+    globalError.value = error instanceof Error ? error.message : String(error);
+  } finally { globalSaving.value = false; }
 }
 
 async function saveProviderInstructions(providerId: string) {
   if (!store.snapshot) return;
-  store.snapshot.providerInstructions[providerId] = providerDrafts.value[providerId] ?? '';
-  await persist('providerInstructions', store.snapshot.providerInstructions);
-  providerSaved.value[providerId] = true;
+  providerSaving.value[providerId] = true;
+  providerErrors.value[providerId] = null;
+  const nextInstructions = { ...store.snapshot.providerInstructions, [providerId]: providerDrafts.value[providerId] ?? '' };
+  try {
+    await persist('providerInstructions', nextInstructions);
+    store.snapshot.providerInstructions = nextInstructions;
+    providerSaved.value[providerId] = true;
+  } catch (error) {
+    providerErrors.value[providerId] = error instanceof Error ? error.message : String(error);
+  } finally { providerSaving.value[providerId] = false; }
 }
 </script>
 
@@ -59,8 +76,8 @@ async function saveProviderInstructions(providerId: string) {
       <section class="settings-card"><div class="settings-card-heading"><span class="eyebrow">{{ t('settings.storage') }}</span><span>⌁</span></div><span class="settings-label">{{ t('settings.configRoot') }}</span><strong class="settings-path mono">{{ store.snapshot?.storageRoot }}</strong><p>{{ t('settings.storageDetail') }}</p><div class="storage-tree mono">config.json<br>projects.json<br><span>goals/</span><br><span>roles/</span><br><span>guardrails/</span><br><span>providers/</span></div></section>
       <section class="settings-card"><div class="settings-card-heading"><span class="eyebrow">{{ t('settings.diagnostics') }}</span><span>!</span></div><p>{{ t('settings.diagnosticsDetail') }}</p><span class="settings-label">{{ t('settings.warnings') }}</span><div v-if="warnings.length" class="warning-list"><span v-for="warning in warnings" :key="warning">{{ warning }}</span></div><strong v-else class="healthy-state"><span class="signal-dot"></span>{{ t('settings.noWarnings') }}</strong></section>
       <section class="settings-card security-card"><div class="settings-card-heading"><span class="eyebrow">{{ t('settings.security') }}</span><span>◇</span></div><p>{{ t('settings.securityDetail') }}</p><div class="security-lines"><span><b>01</b>{{ t('settings.securityReadOnly') }}</span><span><b>02</b>{{ t('settings.securityRootBound') }}</span><span><b>03</b>{{ t('settings.securityAllowlisted') }}</span></div></section>
-      <section class="settings-card global-instructions-card"><div class="settings-card-heading"><div><span class="eyebrow">{{ t('settings.globalInstructions') }}</span><p>{{ t('settings.globalInstructionsDetail') }}</p></div><span class="mono">AGENTS</span></div><textarea v-model="globalDraft" class="global-instructions-textarea" :placeholder="t('settings.globalInstructionsPlaceholder')" @input="globalSaved = false"></textarea><div class="settings-card-actions"><span class="save-state" :class="{ dirty: !globalSaved }">{{ globalSaved ? t('personalization.saved') : t('personalization.unsaved') }}</span><button class="primary-button" type="button" :disabled="globalSaved" @click="saveGlobalInstructions">{{ t('settings.saveGlobalInstructions') }}</button></div></section>
-      <section class="settings-card provider-instructions-card"><div class="settings-card-heading"><div><span class="eyebrow">{{ t('settings.providerInstructions') }}</span><p>{{ t('settings.providerInstructionsDetail') }}</p></div><span class="mono">SCOPED</span></div><div v-for="provider in store.snapshot?.providerSettings" :key="provider.id" class="provider-instruction-editor"><label class="settings-label" :for="`provider-instructions-${provider.id}`">{{ provider.name }}</label><textarea :id="`provider-instructions-${provider.id}`" v-model="providerDrafts[provider.id]" class="global-instructions-textarea" :placeholder="t('settings.providerInstructionsPlaceholder')" @input="providerSaved[provider.id] = false"></textarea><div class="settings-card-actions"><span class="save-state" :class="{ dirty: providerSaved[provider.id] === false }">{{ providerSaved[provider.id] === false ? t('personalization.unsaved') : t('personalization.saved') }}</span><button class="primary-button" type="button" :disabled="providerSaved[provider.id] !== false" @click="saveProviderInstructions(provider.id)">{{ t('settings.saveProviderInstructions') }}</button></div></div></section>
+       <section class="settings-card global-instructions-card"><div class="settings-card-heading"><div><span class="eyebrow">{{ t('settings.globalInstructions') }}</span><p>{{ t('settings.globalInstructionsDetail') }}</p></div><span class="mono">AGENTS</span></div><textarea v-model="globalDraft" class="global-instructions-textarea" :placeholder="t('settings.globalInstructionsPlaceholder')" @input="globalSaved = false; globalError = null"></textarea><p v-if="globalError" class="inline-error" role="alert">{{ globalError }}</p><div class="settings-card-actions"><span class="save-state" :class="{ dirty: !globalSaved }">{{ globalSaved ? t('personalization.saved') : t('personalization.unsaved') }}</span><button class="primary-button" :class="{ 'retry-action': globalError }" type="button" :disabled="globalSaved || globalSaving" @click="saveGlobalInstructions">{{ globalSaving ? t('common.saving') : globalError ? t('common.retry') : t('settings.saveGlobalInstructions') }}</button></div></section>
+       <section class="settings-card provider-instructions-card"><div class="settings-card-heading"><div><span class="eyebrow">{{ t('settings.providerInstructions') }}</span><p>{{ t('settings.providerInstructionsDetail') }}</p></div><span class="mono">SCOPED</span></div><div v-for="provider in store.snapshot?.providerSettings" :key="provider.id" class="provider-instruction-editor"><label class="settings-label" :for="`provider-instructions-${provider.id}`">{{ provider.name }}</label><textarea :id="`provider-instructions-${provider.id}`" v-model="providerDrafts[provider.id]" class="global-instructions-textarea" :placeholder="t('settings.providerInstructionsPlaceholder')" @input="providerSaved[provider.id] = false; providerErrors[provider.id] = null"></textarea><p v-if="providerErrors[provider.id]" class="inline-error" role="alert">{{ providerErrors[provider.id] }}</p><div class="settings-card-actions"><span class="save-state" :class="{ dirty: providerSaved[provider.id] === false }">{{ providerSaved[provider.id] === false ? t('personalization.unsaved') : t('personalization.saved') }}</span><button class="primary-button" type="button" :disabled="providerSaved[provider.id] !== false || providerSaving[provider.id]" @click="saveProviderInstructions(provider.id)">{{ providerSaving[provider.id] ? t('common.saving') : providerErrors[provider.id] ? t('common.retry') : t('settings.saveProviderInstructions') }}</button></div></div></section>
     </div>
   </div>
 </template>
